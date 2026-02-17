@@ -98,11 +98,19 @@ class SystemDetector:
         # Get current SID from environment
         current_sid = os.environ.get('ORACLE_SID', running_dbs[0] if running_dbs else 'Not Set')
         
-        # Count database processes
-        db_processes = 0
+        # Count individual background processes
+        db_processes = {'pmon': 0, 'smon': 0, 'dbwr': 0, 'lgwr': 0, 'ckpt': 0, 'arch': 0, 'reco': 0}
         try:
             result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
-            db_processes = len([line for line in result.stdout.split('\n') if 'ora_' in line])
+            ps_lines = result.stdout.split('\n')
+            for line in ps_lines:
+                if 'ora_pmon_' in line: db_processes['pmon'] += 1
+                if 'ora_smon_' in line: db_processes['smon'] += 1
+                if 'ora_dbw' in line: db_processes['dbwr'] += 1
+                if 'ora_lgwr_' in line: db_processes['lgwr'] += 1
+                if 'ora_ckpt_' in line: db_processes['ckpt'] += 1
+                if 'ora_arc' in line and 'grep' not in line: db_processes['arch'] += 1
+                if 'ora_reco_' in line: db_processes['reco'] += 1
         except:
             pass
         
@@ -152,44 +160,156 @@ class SystemDetector:
             }
         }
     
+    def _run_sql(self, sql, timeout=30):
+        """Run SQL via sqlplus and return raw output"""
+        env = os.environ.copy()
+        env['ORACLE_HOME'] = self.oracle_home
+        env['ORACLE_SID'] = os.environ.get('ORACLE_SID', 'GDCPROD')
+        env['PATH'] = f"{self.oracle_home}/bin:" + env.get('PATH', '')
+
+        full_sql = f"""SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"""
+        try:
+            uid = -1
+            try:
+                uid = os.getuid()
+            except AttributeError:
+                uid = -1
+            if uid == 0:
+                cmd = ['su', '-', 'oracle', '-c',
+                       f'echo "{full_sql}" | {self.oracle_home}/bin/sqlplus -s "/ as sysdba"']
+            else:
+                cmd = ['bash', '-c',
+                       f'echo "{full_sql}" | {self.oracle_home}/bin/sqlplus -s "/ as sysdba"']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            return result.stdout.strip()
+        except Exception as e:
+            return f"SQL Error: {e}"
+
+    def _parse_sql_rows(self, output):
+        """Parse pipe-delimited sqlplus output into list of dicts"""
+        rows = []
+        lines = [l.strip() for l in output.split('\n') if l.strip()]
+        if len(lines) < 2:
+            return rows
+        # First non-empty line = headers, skip separator line (---)
+        headers = [h.strip() for h in lines[0].split('|')]
+        for line in lines[1:]:
+            if set(line.replace(' ', '').replace('|', '')) <= {'-'}:
+                continue  # skip separator
+            vals = [v.strip() for v in line.split('|')]
+            if len(vals) >= len(headers):
+                rows.append(dict(zip(headers, vals[:len(headers)])))
+        return rows
+
     def get_oracle_metrics(self):
-        """Get Oracle performance metrics"""
+        """Get Oracle performance metrics — SGA, PGA, sessions, tablespaces"""
         metrics = {
-            'cpu_usage': 0,
-            'memory_usage': 0,
-            'disk_usage': 0,
-            'sessions': 0,
-            'active_sessions': 0
+            'sga': {},
+            'pga': {},
+            'memory': {'total_sga_mb': 0, 'total_pga_mb': 0},
+            'processes': {'count': 0},
+            'sessions': {'count': 0},
+            'datafiles': 0,
+            'tempfiles': 0,
+            'tablespaces': []
         }
-        
+
+        # Check if Oracle is running first
+        running_dbs = self.get_running_databases()
+        if not running_dbs:
+            return metrics
+
         try:
-            # Get basic system metrics
-            result = subprocess.run(['free', '-m'], capture_output=True, text=True)
-            if result.returncode == 0:
-                lines = result.stdout.split('\n')
-                if len(lines) > 1:
-                    mem_line = lines[1].split()
-                    if len(mem_line) > 2:
-                        total = int(mem_line[1])
-                        used = int(mem_line[2])
-                        if total > 0:
-                            metrics['memory_usage'] = int((used / total) * 100)
-        except:
+            # SGA components
+            sga_out = self._run_sql(
+                "SELECT component, ROUND(current_size/1024/1024, 2) AS size_mb "
+                "FROM v\\$sga_dynamic_components WHERE current_size > 0;"
+            )
+            for row in self._parse_sql_rows(sga_out):
+                try:
+                    name = row.get('COMPONENT', '')
+                    size = float(row.get('SIZE_MB', 0))
+                    if name:
+                        metrics['sga'][name] = size
+                        metrics['memory']['total_sga_mb'] += size
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
             pass
-        
+
         try:
-            # Get disk usage
-            result = subprocess.run(['df', '-h', '/u01'], capture_output=True, text=True)
-            if result.returncode == 0:
-                lines = result.stdout.split('\n')
-                if len(lines) > 1:
-                    disk_line = lines[1].split()
-                    if len(disk_line) > 4:
-                        usage = disk_line[4].replace('%', '')
-                        metrics['disk_usage'] = int(usage)
-        except:
+            # PGA stats
+            pga_out = self._run_sql(
+                "SELECT name, ROUND(value/1024/1024, 2) AS size_mb FROM v\\$pgastat "
+                "WHERE name IN ('total PGA allocated','total PGA inuse','maximum PGA allocated');"
+            )
+            for row in self._parse_sql_rows(pga_out):
+                try:
+                    name = row.get('NAME', '')
+                    size = float(row.get('SIZE_MB', 0))
+                    if name:
+                        metrics['pga'][name] = size
+                        if 'allocated' in name.lower() and 'max' not in name.lower():
+                            metrics['memory']['total_pga_mb'] = size
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
             pass
-        
+
+        try:
+            # Processes & sessions
+            proc_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$process;")
+            for row in self._parse_sql_rows(proc_out):
+                try: metrics['processes']['count'] = int(row.get('CNT', 0))
+                except: pass
+
+            sess_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$session;")
+            for row in self._parse_sql_rows(sess_out):
+                try: metrics['sessions']['count'] = int(row.get('CNT', 0))
+                except: pass
+        except Exception:
+            pass
+
+        try:
+            # Datafiles & tempfiles
+            df_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$datafile;")
+            for row in self._parse_sql_rows(df_out):
+                try: metrics['datafiles'] = int(row.get('CNT', 0))
+                except: pass
+
+            tf_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$tempfile;")
+            for row in self._parse_sql_rows(tf_out):
+                try: metrics['tempfiles'] = int(row.get('CNT', 0))
+                except: pass
+        except Exception:
+            pass
+
+        try:
+            # Tablespace usage
+            ts_out = self._run_sql(
+                "SELECT df.tablespace_name AS name, "
+                "ROUND(df.bytes/1024/1024,2) AS total_mb, "
+                "ROUND((df.bytes - NVL(fs.bytes,0))/1024/1024,2) AS used_mb, "
+                "ROUND(NVL(fs.bytes,0)/1024/1024,2) AS free_mb, "
+                "ROUND((df.bytes - NVL(fs.bytes,0))/df.bytes * 100, 1) AS pct_used "
+                "FROM (SELECT tablespace_name, SUM(bytes) bytes FROM dba_data_files GROUP BY tablespace_name) df "
+                "LEFT JOIN (SELECT tablespace_name, SUM(bytes) bytes FROM dba_free_space GROUP BY tablespace_name) fs "
+                "ON df.tablespace_name = fs.tablespace_name ORDER BY df.tablespace_name;"
+            )
+            for row in self._parse_sql_rows(ts_out):
+                try:
+                    metrics['tablespaces'].append({
+                        'name': row.get('NAME', ''),
+                        'total_mb': float(row.get('TOTAL_MB', 0)),
+                        'used_mb': float(row.get('USED_MB', 0)),
+                        'free_mb': float(row.get('FREE_MB', 0)),
+                        'pct_used': float(row.get('PCT_USED', 0))
+                    })
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
+            pass
+
         return metrics
 
 app = Flask(__name__, 
@@ -454,11 +574,8 @@ def api_system_status():
 def api_oracle_metrics():
     """API: Get detailed Oracle metrics (SGA, PGA, processes, tablespaces)"""
     metrics = detector.get_oracle_metrics()
-    return jsonify({
-        'success': True,
-        'metrics': metrics,
-        'timestamp': datetime.now().isoformat()
-    })
+    # Return metrics at top level so JS can access metrics.sga, metrics.processes, etc.
+    return jsonify(metrics)
 
 
 @app.route('/api/installation-status')
@@ -555,10 +672,28 @@ def api_features_toggle():
         return jsonify({'success': False, 'error': 'Invalid feature'})
     
     try:
-        if action == 'enable':
-            result = execute_cli_command(['oradba', 'protection', feature, 'enable'])
-        elif action == 'disable':
-            result = execute_cli_command(['oradba', 'protection', feature, 'disable'])
+        if feature == 'archivelog':
+            if action == 'enable':
+                result = run_sqlplus("SHUTDOWN IMMEDIATE;\nSTARTUP MOUNT;\nALTER DATABASE ARCHIVELOG;\nALTER DATABASE OPEN;")
+            else:
+                result = run_sqlplus("SHUTDOWN IMMEDIATE;\nSTARTUP MOUNT;\nALTER DATABASE NOARCHIVELOG;\nALTER DATABASE OPEN;")
+        elif feature == 'fra':
+            if action == 'enable':
+                result = run_sqlplus("ALTER SYSTEM SET db_recovery_file_dest_size = 10G SCOPE=BOTH;\nALTER SYSTEM SET db_recovery_file_dest = '/u01/app/oracle/fast_recovery_area' SCOPE=BOTH;")
+            else:
+                result = run_sqlplus("ALTER SYSTEM SET db_recovery_file_dest = '' SCOPE=BOTH;")
+        elif feature == 'flashback':
+            if action == 'enable':
+                result = run_sqlplus("ALTER DATABASE FLASHBACK ON;")
+            else:
+                result = run_sqlplus("ALTER DATABASE FLASHBACK OFF;")
+        elif feature == 'rman':
+            oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+            if action == 'enable':
+                rman_cmd = "CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 7 DAYS;\nCONFIGURE CONTROLFILE AUTOBACKUP ON;"
+                result = run_shell_command(f'source ~/.bash_profile 2>/dev/null; echo "{rman_cmd}" | {oracle_home}/bin/rman target /', as_oracle=True)
+            else:
+                result = 'RMAN cannot be disabled.'
         else:
             return jsonify({'success': False, 'error': 'Invalid action'})
         
@@ -641,10 +776,18 @@ def databases():
 @app.route('/api/databases/list')
 @login_required
 def api_databases_list():
-    """API: List all databases"""
+    """API: List all databases (CDB + PDBs)"""
     try:
-        result = execute_cli_command(['oradba', 'database', 'list'])
-        return jsonify({'success': True, 'output': result})
+        # Get CDB instance info
+        instance_info = run_sqlplus(
+            "SELECT INSTANCE_NAME, STATUS, DATABASE_STATUS FROM V$INSTANCE;"
+        )
+        # Get PDB info
+        pdb_info = run_sqlplus(
+            "SELECT NAME, OPEN_MODE, CON_ID FROM V$PDBS ORDER BY CON_ID;"
+        )
+        output = "=== CDB Instance ===\n" + instance_info + "\n\n=== Pluggable Databases ===\n" + pdb_info
+        return jsonify({'success': True, 'output': output})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -652,14 +795,23 @@ def api_databases_list():
 @app.route('/api/databases/create', methods=['POST'])
 @login_required
 def api_databases_create():
-    """API: Create database"""
+    """API: Create a new Pluggable Database"""
     data = request.json
-    sid = data.get('sid', 'PRODDB')
+    sid = data.get('sid', 'PRODDB').upper()
     memory = data.get('memory', 2048)
     
+    # Sanitize SID name (alphanumeric + underscore only)
+    import re as _re
+    if not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', sid):
+        return jsonify({'success': False, 'error': 'Invalid SID name. Use uppercase letters, digits, underscore (max 30 chars).'})
+    
     try:
-        result = execute_cli_command(['oradba', 'database', 'create', '--sid', sid, '--memory', str(memory)])
-        return jsonify({'success': True, 'output': result})
+        sql = f"""CREATE PLUGGABLE DATABASE {sid} ADMIN USER {sid}_admin IDENTIFIED BY Oracle123
+  FILE_NAME_CONVERT = ('/u01/app/oracle/oradata/GDCPROD/pdbseed/', '/u01/app/oracle/oradata/GDCPROD/{sid}/');
+ALTER PLUGGABLE DATABASE {sid} OPEN;
+ALTER PLUGGABLE DATABASE {sid} SAVE STATE;"""
+        result = run_sqlplus(sql)
+        return jsonify({'success': True, 'output': f'PDB {sid} created successfully.\n{result}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -678,9 +830,20 @@ def storage():
 @app.route('/api/storage/tablespaces')
 @login_required
 def api_storage_tablespaces():
-    """API: List tablespaces"""
+    """API: List tablespaces with size info"""
     try:
-        result = execute_cli_command(['oradba', 'storage', 'tablespace', 'list'])
+        sql = """SELECT df.tablespace_name,
+       ROUND(df.bytes/1024/1024) AS "SIZE_MB",
+       ROUND(NVL(fs.bytes,0)/1024/1024) AS "FREE_MB",
+       ROUND((df.bytes - NVL(fs.bytes,0))/1024/1024) AS "USED_MB",
+       df.autoextensible AS "AUTOEXT"
+FROM (SELECT tablespace_name, SUM(bytes) bytes, MAX(autoextensible) autoextensible
+      FROM dba_data_files GROUP BY tablespace_name) df
+LEFT JOIN (SELECT tablespace_name, SUM(bytes) bytes
+      FROM dba_free_space GROUP BY tablespace_name) fs
+  ON df.tablespace_name = fs.tablespace_name
+ORDER BY df.tablespace_name;"""
+        result = run_sqlplus(sql)
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -691,13 +854,20 @@ def api_storage_tablespaces():
 def api_storage_tablespace_create():
     """API: Create tablespace"""
     data = request.json
-    name = data.get('name')
-    size = data.get('size', '500M')
+    name = data.get('name', '').upper()
+    size = data.get('size', '500M').upper()
+    autoextend = data.get('autoextend', True)
+    
+    import re as _re
+    if not name or not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid tablespace name.'})
     
     try:
-        result = execute_cli_command(['oradba', 'storage', 'tablespace', 'create', 
-                                     '--name', name, '--size', size])
-        return jsonify({'success': True, 'output': result})
+        autoext_clause = ' AUTOEXTEND ON NEXT 100M MAXSIZE UNLIMITED' if autoextend else ''
+        sql = f"""CREATE TABLESPACE {name}
+  DATAFILE '/u01/app/oracle/oradata/GDCPROD/{name.lower()}01.dbf' SIZE {size}{autoext_clause};"""
+        result = run_sqlplus(sql)
+        return jsonify({'success': True, 'output': f'Tablespace {name} created.\n{result}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -718,7 +888,7 @@ def protection():
 def api_protection_archivelog_status():
     """API: ARCHIVELOG status"""
     try:
-        result = execute_cli_command(['oradba', 'protection', 'archivelog', 'status'])
+        result = run_sqlplus("SELECT LOG_MODE, FLASHBACK_ON FROM V$DATABASE;")
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -729,7 +899,7 @@ def api_protection_archivelog_status():
 def api_protection_archivelog_enable():
     """API: Enable ARCHIVELOG"""
     try:
-        result = execute_cli_command(['oradba', 'protection', 'archivelog', 'enable'])
+        result = run_sqlplus("SHUTDOWN IMMEDIATE;\nSTARTUP MOUNT;\nALTER DATABASE ARCHIVELOG;\nALTER DATABASE OPEN;")
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -743,8 +913,17 @@ def api_rman_backup():
     backup_type = data.get('type', 'full')
     
     try:
-        result = execute_cli_command(['oradba', 'rman', 'backup', backup_type])
-        return jsonify({'success': True, 'output': result})
+        oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+        if backup_type == 'incremental':
+            rman_cmd = "BACKUP INCREMENTAL LEVEL 1 DATABASE PLUS ARCHIVELOG;"
+        else:
+            rman_cmd = "BACKUP DATABASE PLUS ARCHIVELOG;"
+        
+        # Run RMAN in background since backups take time
+        log_file = '/tmp/rman-backup.log'
+        cmd = f'source ~/.bash_profile 2>/dev/null; echo "{rman_cmd}" | {oracle_home}/bin/rman target / > {log_file} 2>&1'
+        run_shell_command(f'nohup bash -c \'{cmd}\' &', as_oracle=True, timeout=10)
+        return jsonify({'success': True, 'output': f'RMAN {backup_type} backup started. Check log: {log_file}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -765,7 +944,11 @@ def security():
 def api_security_users():
     """API: List database users"""
     try:
-        result = execute_cli_command(['oradba', 'security', 'user', 'list'])
+        sql = """SELECT username, account_status, default_tablespace, profile, created
+FROM dba_users
+WHERE oracle_maintained = 'N'
+ORDER BY username;"""
+        result = run_sqlplus(sql)
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -776,13 +959,26 @@ def api_security_users():
 def api_security_user_create():
     """API: Create database user"""
     data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    username = data.get('username', '').upper()
+    password = data.get('password', '')
+    default_ts = data.get('defaultTs', 'USERS').upper()
+    profile = data.get('profile', 'DEFAULT').upper()
+    
+    import re as _re
+    if not username or not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', username):
+        return jsonify({'success': False, 'error': 'Invalid username.'})
+    if not password or len(password) < 4:
+        return jsonify({'success': False, 'error': 'Password must be at least 4 characters.'})
     
     try:
-        result = execute_cli_command(['oradba', 'security', 'user', 'create',
-                                     '--name', username, '--password', password])
-        return jsonify({'success': True, 'output': result})
+        sql = f"""CREATE USER {username} IDENTIFIED BY \"{password}\"
+  DEFAULT TABLESPACE {default_ts}
+  TEMPORARY TABLESPACE TEMP
+  PROFILE {profile};
+GRANT CONNECT, RESOURCE TO {username};
+ALTER USER {username} QUOTA UNLIMITED ON {default_ts};"""
+        result = run_sqlplus(sql)
+        return jsonify({'success': True, 'output': f'User {username} created.\n{result}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -803,7 +999,7 @@ def cluster():
 def api_cluster_nodes():
     """API: List cluster nodes"""
     try:
-        result = execute_cli_command(['oradba', 'cluster', 'list'])
+        result = run_shell_command('crsctl stat res -t 2>/dev/null || echo "Cluster not configured. Single-instance mode."', as_oracle=False)
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -818,12 +1014,10 @@ def api_cluster_add_node():
     ip = data.get('ip')
     role = data.get('role', 'database')
     
-    try:
-        result = execute_cli_command(['oradba', 'cluster', 'add-node',
-                                     '--name', name, '--ip', ip, '--role', role])
-        return jsonify({'success': True, 'output': result})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+    return jsonify({
+        'success': False, 
+        'error': f'RAC node addition requires Grid Infrastructure. Configure NFS/SSH first, then run TP15 from the Labs page.'
+    })
 
 
 # ============================================================================
@@ -840,10 +1034,49 @@ def sample():
 @app.route('/api/sample/create', methods=['POST'])
 @login_required
 def api_sample_create():
-    """API: Create sample database"""
+    """API: Create sample HR schema"""
     try:
-        result = execute_cli_command(['oradba', 'sample', 'create'])
-        return jsonify({'success': True, 'output': result})
+        sql = """-- Create HR user for sample schema
+CREATE USER HR IDENTIFIED BY hr123 DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP;
+GRANT CONNECT, RESOURCE, CREATE VIEW TO HR;
+ALTER USER HR QUOTA UNLIMITED ON USERS;
+
+-- Create sample tables as HR
+ALTER SESSION SET CURRENT_SCHEMA = HR;
+
+CREATE TABLE departments (
+    department_id NUMBER(4) PRIMARY KEY,
+    department_name VARCHAR2(30) NOT NULL
+);
+
+CREATE TABLE employees (
+    employee_id NUMBER(6) PRIMARY KEY,
+    first_name VARCHAR2(20),
+    last_name VARCHAR2(25) NOT NULL,
+    email VARCHAR2(25) NOT NULL UNIQUE,
+    hire_date DATE NOT NULL,
+    salary NUMBER(8,2),
+    department_id NUMBER(4) REFERENCES departments(department_id)
+);
+
+INSERT INTO departments VALUES (10, 'Administration');
+INSERT INTO departments VALUES (20, 'Marketing');
+INSERT INTO departments VALUES (30, 'IT');
+INSERT INTO departments VALUES (40, 'Human Resources');
+INSERT INTO departments VALUES (50, 'Finance');
+
+INSERT INTO employees VALUES (100, 'Steven', 'King', 'SKING', SYSDATE-3650, 24000, 10);
+INSERT INTO employees VALUES (101, 'Neena', 'Kochhar', 'NKOCHHAR', SYSDATE-3000, 17000, 10);
+INSERT INTO employees VALUES (102, 'Lex', 'De Haan', 'LDEHAAN', SYSDATE-2800, 17000, 30);
+INSERT INTO employees VALUES (103, 'Alexander', 'Hunold', 'AHUNOLD', SYSDATE-2500, 9000, 30);
+INSERT INTO employees VALUES (104, 'Bruce', 'Ernst', 'BERNST', SYSDATE-2200, 6000, 30);
+INSERT INTO employees VALUES (105, 'Diana', 'Lorentz', 'DLORENTZ', SYSDATE-2000, 4200, 30);
+INSERT INTO employees VALUES (106, 'Daniel', 'Faviet', 'DFAVIET', SYSDATE-1800, 9000, 50);
+INSERT INTO employees VALUES (107, 'John', 'Chen', 'JCHEN', SYSDATE-1600, 8200, 50);
+
+COMMIT;"""
+        result = run_sqlplus(sql)
+        return jsonify({'success': True, 'output': f'Sample HR schema created with departments and employees tables.\n{result}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -851,9 +1084,18 @@ def api_sample_create():
 @app.route('/api/sample/test', methods=['POST'])
 @login_required
 def api_sample_test():
-    """API: Test sample database"""
+    """API: Test sample database queries"""
     try:
-        result = execute_cli_command(['oradba', 'sample', 'test'])
+        sql = """SELECT 'Departments: ' || COUNT(*) AS result FROM hr.departments
+UNION ALL
+SELECT 'Employees: ' || COUNT(*) FROM hr.employees
+UNION ALL
+SELECT 'Avg Salary: $' || TO_CHAR(ROUND(AVG(salary),2)) FROM hr.employees;
+
+SELECT department_name, COUNT(e.employee_id) AS emp_count, ROUND(AVG(e.salary),0) AS avg_sal
+FROM hr.departments d LEFT JOIN hr.employees e ON d.department_id = e.department_id
+GROUP BY department_name ORDER BY department_name;"""
+        result = run_sqlplus(sql)
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})

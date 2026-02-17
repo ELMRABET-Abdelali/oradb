@@ -62,14 +62,16 @@ def show_banner():
 
 @main.group(invoke_without_command=True)
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompts')
+@click.option('--all', 'run_all', is_flag=True, help='Install + run all TP labs (storage, security, RMAN, etc.)')
 @click.option('--config', type=click.Path(exists=True), help='Configuration YAML file')
 @click.pass_context
-def install(ctx, yes, config):
+def install(ctx, yes, run_all, config):
     """📦 Install and configure Oracle Database
 
     Run without subcommand for complete one-shot installation:
-      oradba install          # full install with live output
-      oradba install --yes    # skip confirmation
+      oradba install              # base install (TP01-04)
+      oradba install --yes        # skip confirmation
+      oradba install --yes --all  # install + all post-config TPs
     """
     ctx.ensure_object(dict)
     ctx.obj['yes'] = yes
@@ -77,7 +79,7 @@ def install(ctx, yes, config):
     if ctx.invoked_subcommand is None:
         from .modules.install import InstallManager
         mgr = InstallManager(config)
-        success = mgr.install_all(auto_yes=yes)
+        success = mgr.install_all(auto_yes=yes, run_all_tps=run_all)
         sys.exit(0 if success else 1)
 
 

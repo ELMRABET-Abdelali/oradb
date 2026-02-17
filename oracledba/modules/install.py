@@ -465,10 +465,12 @@ class InstallManager:
     # =========================================================================
 
     def install_all(self, skip_system=False, skip_binaries=False,
-                    skip_db_creation=False, verbose=False, auto_yes=False):
+                    skip_db_creation=False, verbose=False, auto_yes=False,
+                    run_all_tps=False):
         """Complete Oracle 19c installation - one command, live output.
 
         This is the main entry point for: oradba install
+        When run_all_tps=True, also runs TP04-TP15 after the base install.
         """
         log_file = self._open_log("install-all")
 
@@ -559,6 +561,39 @@ class InstallManager:
             self._out("")
             self._out(f"  Log: {log_file}")
             self._out("\u2550" * 60)
+
+            # Run post-install TPs if --all flag was set
+            if run_all_tps:
+                self._out("")
+                self._out("\u2550" * 60)
+                self._out("  Running post-install configuration labs (TP04-TP15)...")
+                self._out("\u2550" * 60)
+                post_labs = ['04', '05', '06', '07', '08', '09',
+                             '10', '11', '12', '13', '14', '15']
+                failed = []
+                for i, lab_num in enumerate(post_labs, 1):
+                    self._step_header(i, len(post_labs),
+                                      f"Post-Config Lab TP{lab_num}")
+                    lab_start = time.time()
+                    try:
+                        success = self.run_lab(lab_num, show_output=True)
+                    except Exception as exc:
+                        self._out(f"  Lab TP{lab_num} error: {exc}")
+                        success = False
+                    elapsed = time.time() - lab_start
+                    self._step_result(i, success, elapsed)
+                    if not success:
+                        failed.append(lab_num)
+                self._out("")
+                if failed:
+                    self._out(f"  \u26a0 Labs with issues: {', '.join(failed)}")
+                else:
+                    self._out("  \u2713 All post-install labs completed!")
+                grand_total = time.time() - total_start
+                gm = int(grand_total // 60)
+                gs = int(grand_total % 60)
+                self._out(f"  Grand Total: {gm}m {gs}s")
+                self._out("\u2550" * 60)
 
             return True
 
