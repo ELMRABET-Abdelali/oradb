@@ -1,0 +1,57 @@
+# Production Configuration Example
+
+system:
+  os: "Rocky Linux 8"
+  min_ram_gb: 16
+  min_disk_gb: 200
+
+oracle:
+  version: "19.3.0.0.0"
+  edition: "EE"
+  oracle_base: "/u01/app/oracle"
+  oracle_home: "/u01/app/oracle/product/19.3.0/dbhome_1"
+
+database:
+  db_name: "PRODDB"
+  sid: "PRODDB"
+  cdb: true
+  pdbs:
+    - name: "APPPDB"
+      admin_user: "appadmin"
+      admin_password: "CHANGE_ME_PROD_PASSWORD_1"
+  
+  sys_password: "CHANGE_ME_SYS_PASSWORD"
+  system_password: "CHANGE_ME_SYSTEM_PASSWORD"
+  
+  sga_target_mb: 8192
+  pga_aggregate_target_mb: 4096
+  
+  enable_archivelog: true
+  enable_flashback: true
+  flashback_retention_hours: 72
+
+backup:
+  retention_days: 14
+  compression: true
+  parallelism: 4
+  backup_location: "/u01/backup"
+  
+  schedule:
+    full_backup: "0 2 * * 0"
+    incremental_backup: "0 2 * * 1-6"
+    archive_backup: "0 */2 * * *"
+
+security:
+  audit_trail: "DB,EXTENDED"
+  tde_enabled: true
+  password_life_time: 90
+  failed_login_attempts: 3
+
+tuning:
+  awr_snapshot_interval: 30
+  awr_retention_days: 14
+  automatic_sql_tuning: true
+
+custom:
+  environment: "production"
+  company_name: "Your Company"

@@ -1,0 +1,71 @@
+# RAC Configuration Example
+
+system:
+  os: "Rocky Linux 8"
+  min_ram_gb: 8
+  min_disk_gb: 100
+
+oracle:
+  version: "19.3.0.0.0"
+  edition: "EE"
+  oracle_base: "/u01/app/oracle"
+  oracle_home: "/u01/app/oracle/product/19.3.0/dbhome_1"
+
+database:
+  db_name: "RACDB"
+  sid: "RACDB"
+  cdb: true
+  pdbs:
+    - name: "RACPDB1"
+      admin_user: "pdbadmin"
+      admin_password: "Oracle123"
+
+asm:
+  enabled: true
+  grid_home: "/u01/app/19.3.0/grid"
+  asm_sid: "+ASM"
+  
+  diskgroups:
+    - name: "DATA"
+      redundancy: "NORMAL"
+      disks:
+        - "/dev/sdb"
+        - "/dev/sdc"
+        - "/dev/sdd"
+    - name: "FRA"
+      redundancy: "NORMAL"
+      disks:
+        - "/dev/sde"
+        - "/dev/sdf"
+
+rac:
+  enabled: true
+  cluster_name: "raccluster"
+  scan_name: "raccluster-scan"
+  scan_port: 1521
+  
+  nodes:
+    - hostname: "rac01"
+      vip: "192.168.1.101"
+      private_ip: "10.0.0.1"
+    - hostname: "rac02"
+      vip: "192.168.1.102"
+      private_ip: "10.0.0.2"
+  
+  interconnect_network: "10.0.0.0/24"
+
+nfs:
+  enabled: true
+  role: "client"
+  server: "nfs-server.local"
+  remote_path: "/u01/shared"
+  mount_point: "/u01/nfs"
+
+backup:
+  retention_days: 7
+  compression: true
+  parallelism: 4
+  backup_location: "+FRA"
+
+custom:
+  environment: "production-rac"

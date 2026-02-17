@@ -1,0 +1,133 @@
+# Installation guide YAML - Quick Start Installation
+
+---
+name: "Oracle 19c Quick Installation with OracleDBA"
+description: "Step-by-step installation guide using oracledba package"
+
+prerequisites:
+  - "Rocky Linux 8 or 9 (or RHEL 8/9)"
+  - "Minimum 4GB RAM"
+  - "Minimum 50GB disk space"
+  - "Python 3.8 or higher"
+  - "Root access"
+  - "Oracle 19c installation files"
+
+steps:
+  - step: 1
+    name: "Install Python and pip"
+    commands:
+      - "yum install -y python3 python3-pip"
+      - "python3 --version"
+    
+  - step: 2
+    name: "Install OracleDBA package"
+    methods:
+      pip:
+        - "pip3 install oracledba"
+      github:
+        - "git clone https://github.com/yourusername/oracledba.git"
+        - "cd oracledba"
+        - "pip3 install -e ."
+    
+  - step: 3
+    name: "Download Oracle 19c binaries"
+    description: "Download from Oracle website or use Google Drive link"
+    location: "/tmp/oracle"
+    file: "LINUX.X64_193000_db_home.zip"
+    
+  - step: 4
+    name: "Run interactive setup wizard"
+    commands:
+      - "oradba-setup"
+    description: "Follow the interactive prompts to configure your installation"
+    
+  - step: 5
+    name: "OR: Use configuration file"
+    commands:
+      - "cp oracledba/configs/default-config.yml my-config.yml"
+      - "nano my-config.yml  # Edit as needed"
+      - "oradba install --config my-config.yml --full"
+    
+  - step: 6
+    name: "Verify installation"
+    commands:
+      - "oradba status"
+      - "oradba sqlplus --sysdba"
+
+quick_commands:
+  full_installation:
+    description: "Complete installation in one command"
+    command: "oradba install --full"
+    
+  with_config:
+    description: "Installation with custom config"
+    command: "oradba install --config my-config.yml --full"
+    
+  step_by_step:
+    description: "Manual step-by-step installation"
+    commands:
+      - "oradba install --system"
+      - "oradba install --binaries"
+      - "oradba install --database"
+
+common_operations:
+  backup:
+    - "oradba rman --setup"
+    - "oradba rman --backup full"
+    - "oradba rman --backup incremental"
+    
+  dataguard:
+    - "oradba dataguard --setup --primary-host db1 --standby-host db2 --db-name PROD"
+    - "oradba dataguard --status"
+    
+  tuning:
+    - "oradba tuning --analyze"
+    - "oradba tuning --awr"
+    
+  multitenant:
+    - "oradba pdb --create PDB1"
+    - "oradba pdb --list"
+    - "oradba pdb --open PDB1"
+    
+  asm:
+    - "oradba asm --setup --disks /dev/sdb /dev/sdc"
+    - "oradba asm --create-diskgroup --name DATA --redundancy NORMAL --disks /dev/sdb /dev/sdc"
+    
+  rac:  
+    - "oradba rac --setup --nodes node1 node2 --vip 192.168.1.101 192.168.1.102"
+    - "oradba rac --status"
+    
+  monitoring:
+    - "oradba status"
+    - "oradba monitor --tablespaces"
+    - "oradba monitor --sessions"
+    - "oradba logs --alert"
+
+troubleshooting:
+  permission_denied:
+    issue: "Permission denied errors"
+    solution: "Run as root or with sudo for system-level operations"
+    
+  oracle_not_found:
+    issue: "Oracle binaries not found"
+    solution: "Set ORACLE_HOME and ORACLE_SID environment variables"
+    
+  database_not_starting:
+    issue: "Database fails to start"
+    solution: "Check alert log with: oradba logs --alert"
+    
+  insufficient_memory:
+    issue: "Insufficient shared memory"
+    solution: "Adjust kernel parameters or reduce SGA_TARGET"
+
+next_steps:
+  - "Configure RMAN backups: oradba rman --setup"
+  - "Enable Flashback: oradba flashback --enable"
+  - "Create additional PDBs: oradba pdb --create <name>"
+  - "Setup monitoring: oradba monitor --tablespaces"
+  - "Review security: oradba security --audit --enable"
+
+support:
+  documentation: "https://github.com/yourusername/oracledba/wiki"
+  issues: "https://github.com/yourusername/oracledba/issues"
+  email: "dba@formation.com"

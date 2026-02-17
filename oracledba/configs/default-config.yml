@@ -1,0 +1,267 @@
+# Configuration OracleDBA par défaut
+# Oracle Database 19c Installation and Management
+
+# ============================================================================
+# SYSTEM CONFIGURATION
+# ============================================================================
+system:
+  os: "Rocky Linux 8"
+  min_ram_gb: 4
+  min_disk_gb: 50
+  swap_size_gb: 4
+  hostname: "oracledb01"
+
+# ============================================================================
+# ORACLE USERS AND GROUPS
+# ============================================================================
+oracle_users:
+  - name: "oracle"
+    uid: 54321
+    primary_group: "oinstall"
+    groups:
+      - "dba"
+      - "oper"
+      - "backupdba"
+      - "dgdba"
+      - "kmdba"
+      - "racdba"
+    password: "Oracle123"  # CHANGE IN PRODUCTION!
+
+oracle_groups:
+  - { name: "oinstall", gid: 54321 }
+  - { name: "dba", gid: 54322 }
+  - { name: "oper", gid: 54323 }
+  - { name: "backupdba", gid: 54324 }
+  - { name: "dgdba", gid: 54325 }
+  - { name: "kmdba", gid: 54326 }
+  - { name: "racdba", gid: 54327 }
+
+# ============================================================================
+# ORACLE INSTALLATION
+# ============================================================================
+oracle:
+  version: "19.3.0.0.0"
+  edition: "EE"  # Enterprise Edition
+  oracle_base: "/u01/app/oracle"
+  oracle_home: "/u01/app/oracle/product/19.3.0/dbhome_1"
+  inventory_location: "/u01/app/oraInventory"
+  
+  # Binary download
+  download:
+    google_drive_id: "1Mi7B2HneMBIyxJ01tnA-ThQ9hr2CAsns"
+    filename: "LINUX.X64_193000_db_home.zip"
+    size_gb: 3.06
+    checksum_type: "sha256"
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+database:
+  # General
+  db_name: "GDCPROD"
+  db_unique_name: "GDCPROD"
+  sid: "GDCPROD"
+  db_domain: ""
+  
+  # CDB/PDB Configuration
+  cdb: true
+  pdbs:
+    - name: "PDB1"
+      admin_user: "pdb1admin"
+      admin_password: "Oracle123"  # CHANGE!
+    - name: "PDB2"
+      admin_user: "pdb2admin"
+      admin_password: "Oracle123"  # CHANGE!
+  
+  # Passwords (CHANGE ALL IN PRODUCTION!)
+  sys_password: "SysOracle123"
+  system_password: "SystemOracle123"
+  
+  # Storage
+  datafile_dest: "/u01/app/oracle/oradata"
+  recovery_dest: "/u01/app/oracle/fast_recovery_area"
+  recovery_size_gb: 20
+  
+  # Character Sets
+  charset: "AL32UTF8"
+  ncharset: "AL16UTF16"
+  
+  # Memory (adjust based on available RAM)
+  memory_percent: 50
+  sga_target_mb: 2048
+  pga_aggregate_target_mb: 1024
+  
+  # Database Options
+  enable_archivelog: true
+  enable_force_logging: true
+  enable_flashback: true
+  flashback_retention_hours: 48
+
+# ============================================================================
+# LISTENER CONFIGURATION
+# ============================================================================
+listener:
+  name: "LISTENER"
+  port: 1521
+  protocol: "TCP"
+
+# ============================================================================
+# BACKUP CONFIGURATION (RMAN)
+# ============================================================================
+backup:
+  # Retention Policy
+  retention_policy: "REDUNDANCY 2"
+  retention_days: 7
+  
+  # Backup Settings
+  compression: true
+  compression_algorithm: "MEDIUM"
+  parallelism: 2
+  autobackup_controlfile: true
+  
+  # Backup Location
+  backup_location: "/u01/backup"
+  backup_format: "db_%d_%T_%s_%p"
+  
+  # Backup Schedule
+  schedule:
+    full_backup: "0 2 * * 0"  # Sunday 2 AM
+    incremental_backup: "0 2 * * 1-6"  # Mon-Sat 2 AM
+    archive_backup: "0 */4 * * *"  # Every 4 hours
+
+# ============================================================================
+# FLASHBACK CONFIGURATION
+# ============================================================================
+flashback:
+  enabled: true
+  retention_target_minutes: 2880  # 48 hours
+  guaranteed_restore_points: true
+
+# ============================================================================
+# DATA GUARD CONFIGURATION
+# ============================================================================
+dataguard:
+  enabled: false
+  primary_host: "oracledb01"
+  standby_host: "oracledb02"
+  standby_role: "PHYSICAL"  # PHYSICAL or LOGICAL
+  protection_mode: "MAXIMUM_PERFORMANCE"
+  
+  # Transport
+  log_transport: "ASYNC"
+  net_timeout: 30
+  reopen_secs: 300
+
+# ============================================================================
+# ASM CONFIGURATION (Automatic Storage Management)
+# ============================================================================
+asm:
+  enabled: false
+  grid_home: "/u01/app/19.3.0/grid"
+  asm_sid: "+ASM"
+  
+  diskgroups:
+    - name: "DATA"
+      redundancy: "EXTERNAL"
+      disks:
+        - "/dev/sdb"
+        - "/dev/sdc"
+    - name: "FRA"
+      redundancy: "EXTERNAL"
+      disks:
+        - "/dev/sdd"
+
+# ============================================================================
+# RAC CONFIGURATION (Real Application Clusters)
+# ============================================================================
+rac:
+  enabled: false
+  cluster_name: "oraclecluster"
+  scan_name: "oraclecluster-scan"
+  scan_port: 1521
+  
+  nodes:
+    - hostname: "oracledb01"
+      vip: "192.168.1.101"
+      private_ip: "10.0.0.1"
+    - hostname: "oracledb02"
+      vip: "192.168.1.102"
+      private_ip: "10.0.0.2"
+  
+  interconnect_network: "10.0.0.0/24"
+
+# ============================================================================
+# NFS CONFIGURATION
+# ============================================================================
+nfs:
+  enabled: false
+  role: "client"  # server or client
+  
+  # For NFS Server
+  export_path: "/u01/shared"
+  export_options: "rw,sync,no_root_squash,no_all_squash"
+  
+  # For NFS Client
+  server: "192.168.1.10"
+  remote_path: "/u01/shared"
+  mount_point: "/u01/nfs"
+  mount_options: "rw,bg,hard,nointr,tcp,vers=3,timeo=600,rsize=32768,wsize=32768,actimeo=0"
+
+# ============================================================================
+# SECURITY CONFIGURATION
+# ============================================================================
+security:
+  # Auditing
+  audit_trail: "DB,EXTENDED"
+  audit_sys_operations: true
+  
+  # TDE (Transparent Data Encryption)
+  tde_enabled: false
+  wallet_location: "/u01/app/oracle/admin/wallet"
+  
+  # Password Policy
+  password_life_time: 180
+  password_grace_time: 7
+  password_lock_time: 1
+  failed_login_attempts: 5
+
+# ============================================================================
+# PERFORMANCE TUNING
+# ============================================================================
+tuning:
+  # AWR (Automatic Workload Repository)
+  awr_enabled: true
+  awr_snapshot_interval: 60  # minutes
+  awr_retention_days: 8
+  
+  # Statistics
+  auto_stats_collection: true
+  stats_retention_days: 31
+  
+  # SQL Tuning
+  sql_tuning_advisor: true
+  automatic_sql_tuning: false
+
+# ============================================================================
+# MONITORING
+# ============================================================================
+monitoring:
+  # Alert Thresholds
+  tablespace_usage_warning: 80
+  tablespace_usage_critical: 90
+  
+  # Email Notifications
+  email_enabled: false
+  smtp_server: "smtp.example.com"
+  smtp_port: 25
+  alert_email: "dba@example.com"
+
+# ============================================================================
+# CUSTOM SETTINGS
+# ============================================================================
+custom:
+  # Add your custom settings here
+  company_name: "Your Company"
+  environment: "development"  # development, test, production
+  backup_to_cloud: false
+  cloud_provider: ""  # aws, azure, gcp

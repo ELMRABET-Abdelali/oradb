@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oracledba"
+version = "1.0.0"
+description = "Complete Oracle 19c DBA package with installation, backup, tuning, ASM, RAC and more"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "DBA Formation Team", email = "dba@formation.com"}
+]
+keywords = ["oracle", "oracle19c", "dba", "database", "rman", "dataguard", "asm", "rac"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: System Administrators",
+    "Topic :: Database :: Database Engines/Servers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+
+dependencies = [
+    "click>=8.1.0",
+    "colorama>=0.4.6",
+    "pyyaml>=6.0.1",
+    "requests>=2.31.0",
+    "rich>=13.7.0",
+    "paramiko>=3.4.0",
+    "jinja2>=3.1.3",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "flake8>=6.1.0",
+]
+oracle = [
+    "cx_Oracle>=8.3.0",
+    "oracledb>=2.0.0",
+]
+
+[project.scripts]
+oradba = "oracledba.cli:main"
+oradba-setup = "oracledba.setup_wizard:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/oracledba"
+Documentation = "https://github.com/yourusername/oracledba/wiki"
+Repository = "https://github.com/yourusername/oracledba"
+Issues = "https://github.com/yourusername/oracledba/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["oracledba*"]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+oracledba = ["scripts/*.sh", "scripts/*.sql", "configs/*.yaml", "configs/*.yml", "templates/*.j2"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
