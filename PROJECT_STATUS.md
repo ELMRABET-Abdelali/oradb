@@ -1,66 +1,73 @@
 # OraDB Project - Current Status and Understanding
 
 ## 📅 Last Updated
-February 17, 2026
+February 17, 2026 — Session 3 (conversation saturated)
 
 ## 🎯 Project Overview
-**OraDB** - Complete Oracle Database 19c administration tool for Rocky Linux 8/9
+**OraDB** - Complete Oracle Database 19c administration tool for Rocky Linux 8
 - **Repository:** https://github.com/ELMRABET-Abdelali/oradb.git
-- **Package Name:** oracledba
+- **Package Name:** oracledba v1.0.0
+- **CLI Command:** `oradba`
 - **Primary Language:** Python 3.9
 - **Target Platform:** Rocky Linux 8
+- **Latest Commit:** `8b35bbf` — fix dbca templateName
 
 ## 🖥️ Deployment Information
 
-### Remote Server
-- **IP Address:** 178.128.10.67
-- **OS:** Rocky Linux 8
+### Active VM (NEW — Session 3)
+- **IP Address:** 138.197.171.216
+- **OS:** Rocky Linux 8.8 (7.5GB RAM, 2 CPUs, 156GB disk)
 - **SSH Key:** `./otherfiles/id_rsa`
 - **User:** root
 - **Installation Path:** `/opt/oradb`
+- **Oracle 19c:** FULLY INSTALLED AND RUNNING
+- **GUI:** http://138.197.171.216:5000 (admin / admin123)
+
+### Previous VM (Session 1-2, no longer active)
+- **IP Address:** 178.128.10.67
 
 ### Local Development
 - **Platform:** Windows
 - **Working Directory:** `C:\Users\DELL\Documents\GitHub\oradb`
+- **Git:** `C:\Users\DELL\AppData\Local\GitHubDesktop\app-3.5.4\resources\app\git\cmd\git.exe`
 
-## ✅ What Has Been Accomplished
+## ✅ What Has Been Accomplished (All Sessions Combined)
 
-### 1. Initial Deployment (Completed)
-- ✅ SSH connection established to Rocky 8 server (178.128.10.67)
-- ✅ Installed prerequisites: git, python39, python39-pip, gcc, make
-- ✅ Cloned repository from GitHub to `/opt/oradb`
-- ✅ Installed Python package via pip (`pip install -e .`)
-- ✅ Installed GUI dependencies from `requirements-gui.txt`
-- ✅ Created deployment script: `deploy-to-rocky8.sh`
-- ✅ Created deployment guide: `DEPLOY_GUIDE.md`
+### Session 1-2: Initial Development
+- ✅ CLI + Web GUI built and functional
+- ✅ 26 CLI commands, 75 Flask routes, 14 HTML templates
+- ✅ Deployed to old VM 178.128.10.67
 
-### 2. Web GUI Setup (Completed)
-- ✅ Web GUI started and running on port 8080
-- ✅ Firewall configured (ports 5000 and 8080 open)
-- ✅ GUI accessible at: http://178.128.10.67:8080
-- ✅ Default credentials: admin / admin123
+### Session 3: Bug Fixes + New VM Deployment (Current)
 
-### 3. Code Fixes Applied
+#### Bug Fixes Applied
+- ✅ **Critical:** Removed `shell=True` from 3 `subprocess.run()` calls in install.py (was silently breaking commands)
+- ✅ **High:** Added shell metacharacter injection protection to `/api/terminal/execute` in web_server.py
+- ✅ **Medium:** Changed 2 bare `except:` to `except AttributeError:` in web_server.py
+- ✅ **Low:** Removed 7 dead module imports from cli.py
+- ✅ **Low:** Removed duplicate `detector = SystemDetector()` in web_server.py
 
-#### SystemDetector Class (web_server.py)
-- ✅ Added `detect_all()` method to detect Oracle components
-- ✅ Added `get_oracle_metrics()` method for system metrics
-- ✅ Fixed return structure to include all required fields:
-  - `oracle`: version, binaries (bool), oracle_home, oracle_base
-  - `database`: running, instances, count, current_sid, processes
-  - `listener`: running, status, listeners[], ports[]
-  - `cluster`: configured, type, nodes[]
-  - `grid`: installed, running, status
-  - `asm`: running, installed, status
-  - `features`: archivelog, flashback, dataguard, rman
-- ✅ Fixed boolean vs dict handling for `binaries` field
-- ✅ Dashboard now accessible without errors
+#### TP01 Script Fix
+- ✅ Removed non-existent `libnsl2-devel` package from dnf install
+- ✅ Added `--skip-broken` flag to dnf install for robustness
+- ✅ Separated optional packages (compat-openssl10, python3-configshell) with fallback
+- ✅ Made sysctl.conf idempotent (removes old Oracle params before re-adding)
 
-### 4. Oracle Installation Started (In Progress)
-- ✅ Missing package identified and resolved: `libnsl2` (was looking for `libnsl2-devel`)
-- ✅ Started complete Oracle installation: `oracledba install all --verbose`
-- ⏳ **Currently running** - Expected completion: 30-45 minutes
-- 📋 Installation log: `/tmp/install.log`
+#### TP03/DBCA Fix
+- ✅ Added missing `-templateName General_Purpose.dbc` to dbca command
+- ✅ Changed `-memoryPercentage 40` to `-totalMemory 2048` (works on low-RAM VMs)
+
+#### Documentation
+- ✅ DEPLOY_GUIDE.md completely rewritten as 13-section "Project Brain" document
+- ✅ Audited all 30 doc files (guide/ + docs/), found 3 conflicting CLI syntaxes
+
+#### Oracle 19c Installation on 138.197.171.216 — COMPLETED
+- ✅ **TP01:** System readiness — users, groups, 50+ packages, kernel params, swap, /u01 structure
+- ✅ **TP02:** Oracle binaries downloaded (3.06 GB in 46s), extracted (6.5 GB)
+- ✅ **TP03 Software:** runInstaller succeeded, root scripts (orainstRoot.sh + root.sh) completed
+- ✅ **TP03 Database:** DBCA created CDB GDCPROD + PDB GDCPDB, listener on port 1521
+- ✅ **Verified:** `ora_pmon_GDCPROD` process running, database operational
+- ✅ **GUI running:** http://138.197.171.216:5000 on 0.0.0.0:5000 (75 routes)
 
 ## 🏗️ Architecture Understanding
 
@@ -122,59 +129,54 @@ oracledba/
 
 ## 🔧 Current Running Services
 
-### On Remote Server (178.128.10.67)
+### On Active VM (138.197.171.216)
 
-1. **Web GUI**
-   - Process: `python3.9 -m oracledba.cli install gui --port 8080`
-   - Log: `/tmp/gui.log`
-   - Status: ✅ Running
-   - URL: http://178.128.10.67:8080
+1. **Oracle Database 19c**
+   - CDB: GDCPROD (open, read-write)
+   - PDB: GDCPDB
+   - SID: GDCPROD
+   - Listener: port 1521
+   - Passwords: SYS=Oracle123, SYSTEM=Oracle123, PDB Admin=Oracle123
+   - Status: ✅ Running (`ora_pmon_GDCPROD` confirmed)
 
-2. **Oracle Installation**
-   - Process: `python3.9 -m oracledba.cli install all --verbose`
-   - Log: `/tmp/install.log`
-   - Status: ⏳ In Progress
-   - Started: ~13:48 UTC
-   - Expected completion: 14:18-14:33 UTC (30-45 minutes from start)
+2. **Web GUI**
+   - URL: http://138.197.171.216:5000
+   - Credentials: admin / admin123
+   - Log: `/var/log/oradba-gui.log`
+   - Status: ✅ Running (75 routes, 0.0.0.0:5000)
 
-## 🐛 Known Issues and Fixes
+## 🐛 Known Issues Fixed This Session
 
-### Issue 1: Dashboard Not Accessible (FIXED)
-**Problem:** AttributeError: 'SystemDetector' object has no attribute 'detect_all'
+### Issue 1: subprocess.run shell=True with list args (FIXED — Critical)
+- 3 calls in install.py were passing list + `shell=True`, dropping all args
+- Removed `shell=True` from listener_cmd, dbca_cmd, verify_cmd
 
-**Root Cause:** 
-- SystemDetector class was missing the `detect_all()` and `get_oracle_metrics()` methods
-- Code was calling methods that didn't exist
+### Issue 2: Terminal Command Injection (FIXED — High)
+- `/api/terminal/execute` was only whitelist-checking but not rejecting shell metacharacters
+- Added rejection of `;`, `&&`, `||`, `|`, `$()`, backticks, `>`, `<`
 
-**Solution Applied:**
-- Added complete `detect_all()` method returning proper data structure
-- Added `get_oracle_metrics()` method for system statistics
-- Fixed all references to handle boolean vs dictionary for `binaries` field
-- File updated: `oracledba/web_server.py`
+### Issue 3: DBCA Missing templateName (FIXED — Session 3)
+- `dbca -silent -createDatabase` requires `-templateName` alongside `-gdbName`
+- Added `-templateName General_Purpose.dbc`
+- Changed `-memoryPercentage 40` → `-totalMemory 2048` for low-RAM VMs
 
-### Issue 2: Installation Button Non-Functional (IDENTIFIED)
-**Problem:** "Start Automated Installation" button in GUI does nothing
+### Issue 4: TP01 Package Failures (FIXED — Session 3)
+- `libnsl2-devel` doesn't exist on Rocky 8
+- Added `--skip-broken`, separated optional packages with fallback
 
-**Root Cause:** 
-- Frontend button exists but no backend API endpoint to handle the request
-- No route defined to trigger `oracledba install all` from GUI
+## 🎯 Next Steps (For Next AI Session)
 
-**Solution Needed:**
-- Add API endpoint `/api/installation/start` to web_server.py
-- Endpoint should trigger installation in background
-- Return installation status and log location
-- Add real-time log streaming capability
+### Immediate Priority — GUI Installation Page UX
+The user requested these changes to the installation page:
+1. **Remove sync popup** — Move the "synced" indicator to the header bar only, not a popup every 2-3 seconds
+2. **Step-by-step installation view** — Show each step executing sequentially like a normal installer (not a log dump). User wants to see: Step 1 complete → Step 2 running → Step 3 pending, with commands being executed visible in real-time
+3. **No log list** — Don't show a log file dropdown, just show the installation flowing step by step
+4. The user said: "like a normal logiciel would do in my local pc"
 
-### Issue 3: Missing Package (FIXED)
-**Problem:** TP01 failed with "Unable to find a match: libnsl2-devel"
-
-**Root Cause:**
-- Rocky 8 doesn't have `libnsl2-devel` package
-- Only has: `libnsl`, `libnsl2`, `libnsl-devel`
-
-**Solution Applied:**
-- Installed available packages: `dnf install -y libnsl2 libnsl libnsl-devel`
-- Restarted installation
+### Medium Priority
+- Test all 15 TPs via GUI
+- Security hardening (change default passwords, HTTPS)
+- Complete dashboard integration with real Oracle metrics
 
 ## 📂 Important File Locations
 
@@ -204,183 +206,122 @@ oracledba/
 
 ### Connect to Server
 ```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67
+ssh -i otherfiles/id_rsa root@138.197.171.216
 ```
 
-### Monitor Oracle Installation
+### CLI Commands (on VM)
 ```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67 "tail -f /tmp/install.log"
+oradba --version            # v1.0.0
+oradba --help               # 26 commands
+oradba precheck             # System check with Rich table
+oradba install system       # TP01
+oradba install binaries     # TP02
+oradba install software     # runInstaller
+oradba install database     # DBCA
+oradba install gui          # Start web GUI
 ```
 
-### Check Running Processes
+### Start GUI
 ```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67 "ps aux | grep python3.9"
-```
-
-### Restart GUI
-```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67 "killall python3.9; cd /opt/oradb; nohup python3.9 -m oracledba.cli install gui --port 8080 > /tmp/gui.log 2>&1 &"
+ssh -i otherfiles/id_rsa root@138.197.171.216 "cd /opt/oradb && nohup python3.9 -m oracledba.web_server > /var/log/oradba-gui.log 2>&1 &"
 ```
 
 ### Update Code from GitHub
 ```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67 "cd /opt/oradb && git pull origin main"
+ssh -i otherfiles/id_rsa root@138.197.171.216 "cd /opt/oradb && git pull origin main"
 ```
 
-### Complete Reinstall
-```bash
-ssh -i otherfiles/id_rsa root@178.128.10.67 "cd /opt && rm -rf oradb && git clone https://github.com/ELMRABET-Abdelali/oradb.git && cd oradb && python3.9 -m pip install -e . && python3.9 -m pip install -r requirements-gui.txt"
+### Git commit+push from Windows
+```powershell
+$git = "C:\Users\DELL\AppData\Local\GitHubDesktop\app-3.5.4\resources\app\git\cmd\git.exe"
+& $git add -A
+& $git commit -m "message"
+& $git push origin main
 ```
 
-## 🎯 Next Steps
+### Create files on VM via SSH (avoiding escaping issues)
+```powershell
+# Use base64 to avoid PowerShell → SSH escaping problems
+# Example: echo BASE64STRING | base64 -d > /path/to/file
+```
 
-### Immediate (Critical)
-1. ⏳ **Wait for Oracle installation to complete** (~20-30 minutes remaining)
-2. ✅ **Verify Oracle installation**
-   - Check database is running: `ps -ef | grep pmon`
-   - Check listener is running: `ps -ef | grep tnslsnr`
-   - Connect to database: `sqlplus / as sysdba`
+## 💡 Technical Notes
 
-### Short-term (High Priority)
-3. 🔧 **Fix Installation GUI Button**
-   - Add `/api/installation/start` endpoint
-   - Add `/api/installation/status` endpoint for progress
-   - Add `/api/installation/logs` endpoint for real-time logs
-   - Update frontend JavaScript to call API
+### Oracle Installation on VM (Actual Timings)
+- TP01 System Readiness: ~2 minutes (packages, kernel, swap, users)
+- TP02 Binary Download: ~1 minute (3.06 GB at ~65MB/s from Google Drive)
+- TP02 Extraction: ~2 minutes (6.5 GB extracted)
+- TP03 runInstaller: ~3 minutes
+- TP03 DBCA: ~10-12 minutes
+- **Total: ~18 minutes** (NOT 30-45 as documentation says)
 
-4. 🧪 **Test All 15 Training Practicals**
-   - Verify each TP can be executed via CLI
-   - Test TP completion and logging
-   - Verify GUI displays correct status
+## 🔍 Architecture Quick Reference
 
-5. 📊 **Complete Dashboard Integration**
-   - Real-time database metrics
-   - System resource monitoring
-   - Installation progress tracking
+### CLI (26 commands via Click)
+```
+oradba install [all|full|system|binaries|software|database|gui|check]
+oradba [rman|dataguard|tuning|asm|rac|pdb|flashback|security|nfs|logs|monitor]
+oradba [configure|maintenance|advanced]
+oradba [start|stop|restart|status|sqlplus|exec|precheck|test|vm-init|download|genrsp|labs]
+```
 
-### Medium-term
-6. 🔐 **Security Hardening**
-   - Change default admin password
-   - Implement proper session management
-   - Add HTTPS support
+### Web GUI (75 routes, Flask 3.1.2)
+- Auth: PBKDF2-SHA256, admin/admin123
+- Templates: 14 HTML (dashboard, installation, rman, dataguard, etc.)
+- API: `/api/installation/*`, `/api/terminal/*`, `/api/dashboard/*`
 
-7. 📝 **Documentation Updates**
-   - Update guides with actual deployment experience
-   - Add troubleshooting section
-   - Create video walkthrough
+### Key Scripts (French-named, in oracledba/scripts/)
+- `tp01-system-readiness.sh` (root) — System prep
+- `tp02-installation-binaire.sh` (oracle) — Download + extract
+- `tp03-creation-instance.sh` (oracle) — runInstaller + DBCA
 
-8. 🧩 **Feature Completion**
-   - All menu items functional
-   - Database management operations
-   - Backup/restore through GUI
-   - Performance tuning interface
-
-## 🔍 System Understanding
-
-### How Installation Works
-1. **System Readiness (TP01)**
-   - Creates oracle user (uid 54321) and groups (oinstall, dba, oper)
-   - Configures kernel parameters in `/etc/sysctl.conf`
-   - Installs required packages (~50 packages)
-   - Sets up directory structure in `/u01/app/oracle`
-
-2. **Binary Download (TP02)**
-   - Downloads Oracle 19c from Google Drive (3GB zip file)
-   - Extracts to ORACLE_HOME
-   - Sets environment variables
-   - Configures .bash_profile for oracle user
-
-3. **Software Installation (TP03)**
-   - Runs Oracle installer in silent mode
-   - Uses response files for automation
-   - Executes root scripts
-   - Configures Oracle environment
-
-4. **Database Creation (TP03 continued)**
-   - Creates listener on port 1521
-   - Runs DBCA to create CDB (GDCPROD) and PDB (GDCPDB)
-   - Configures automatic memory management
-   - Sets up Fast Recovery Area
-
-### Web GUI Authentication Flow
-1. User accesses http://178.128.10.67:8080
-2. Flask redirects to `/login`
-3. Credentials validated against `~/.oracledba/gui_users.json`
-4. Passwords hashed with PBKDF2 (100,000 iterations)
-5. Session stored in Flask session with secret key
-6. First login forces password change
-
-### Dashboard Data Flow
-1. Frontend loads dashboard page
-2. JavaScript calls detection APIs
-3. Backend SystemDetector scans system:
-   - Checks for pmon processes (database)
-   - Checks for tnslsnr processes (listener)
-   - Reads ORACLE_HOME directory
-   - Checks for Grid/ASM processes
-4. Returns JSON with component status
-5. Frontend displays status cards
-
-## 💡 Technical Insights
-
-### Package Structure
-- Uses `setup.py` for package definition
-- Editable install (`pip install -e .`) allows live code updates
-- Entry points defined for CLI commands
-- Module imports structured hierarchically
-
-### CLI Framework
-- Built with Click framework
-- Commands organized in groups
-- Options defined with decorators
-- Help text comprehensive and user-friendly
-
-### Web Framework
-- Flask for backend API
-- Flask-CORS for cross-origin requests
-- Flask-Session for session management
-- Flask-SocketIO for real-time updates (planned)
-- Templates use Jinja2
-- Static files served from `web/static/`
-
-### Database Detection
-- Process-based detection (searching for `ora_pmon_*`)
-- File-system checks (ORACLE_HOME existence)
-- Reading XML files for version info
-- Network port scanning for listener
-
-## 🚨 Critical Notes for Next AI
-
-1. **DO NOT DELETE `/opt/oradb` without backing up** - Installation in progress
-2. **Port 8080 is active** - GUI is running there
-3. **Installation takes 30-45 minutes** - Be patient
-4. **SSH key location is critical** - `./otherfiles/id_rsa`
-5. **GitHub repo is the source of truth** - Always pull before making changes
-6. **Python 3.9 is required** - Not 3.8 or 3.10
-7. **Rocky 8 specific** - Some packages differ from Ubuntu/CentOS
-8. **Oracle user will own processes** - Not root after installation
-9. **Firewall must allow ports** - 8080 (GUI), 1521 (Oracle Listener)
-10. **Installation log is your friend** - `/tmp/install.log` for debugging
+### Oracle Defaults
+- ORACLE_HOME: `/u01/app/oracle/product/19.3.0/dbhome_1`
+- ORACLE_BASE: `/u01/app/oracle`
+- SID: GDCPROD, PDB: GDCPDB
+- Listener: port 1521
+- Google Drive File ID: `1Mi7B2HneMBIyxJ01tnA-ThQ9hr2CAsns`
 
 ## 📞 Quick Reference
 
 ### Access URLs
-- GUI: http://178.128.10.67:8080
-- Dashboard: http://178.128.10.67:8080/dashboard
-- Installation: http://178.128.10.67:8080/installation
+- GUI: http://138.197.171.216:5000
+- Dashboard: http://138.197.171.216:5000/dashboard
+- Installation: http://138.197.171.216:5000/installation
 
-### Key Files to Watch
-- `oracledba/web_server.py` - Web GUI backend
-- `oracledba/cli.py` - CLI commands
-- `oracledba/modules/install.py` - Installation manager
-- `requirements-gui.txt` - GUI dependencies
+### Key Files Modified This Session
+- `oracledba/web_server.py` — Command injection fix, except AttributeError, duplicate detector
+- `oracledba/cli.py` — Removed 7 dead imports
+- `oracledba/modules/install.py` — Removed shell=True, fixed DBCA templateName + totalMemory
+- `oracledba/scripts/tp01-system-readiness.sh` — Package fixes, idempotent sysctl
+- `DEPLOY_GUIDE.md` — Complete rewrite as 13-section project brain
+- `PROJECT_STATUS.md` — This file
+
+### Commits This Session
+- `a58b53e` — new release v4 (bug fixes from session 2)
+- `339b349` — docs: rewrite DEPLOY_GUIDE as master project brain document
+- `e4fe9cf` — fix: tp01 skip-broken packages, idempotent sysctl
+- `8b35bbf` — fix dbca templateName
 
 ### Common Issues
-- **"Module not found"** → Run `pip install -e .` in `/opt/oradb`
-- **"Port in use"** → Kill old process: `killall python3.9`
-- **"Dashboard error"** → Check SystemDetector has all methods
-- **"Package not found"** → Use `dnf search` to find correct name
+- **PowerShell → SSH escaping:** Use base64 encoding for complex commands
+- **"Module not found"** → Run `pip3.9 install -e .` in `/opt/oradb`
+- **GUI not accessible** → Check `ss -tlnp | grep 5000` and firewall
+- **DBCA fails** → Ensure `-templateName General_Purpose.dbc` is present
+
+## 🚨 Critical Notes for Next AI Session
+
+1. **VM is 138.197.171.216** (not 178.128.10.67 — old VM)
+2. **Oracle 19c is FULLY INSTALLED** — GDCPROD running, GDCPDB available
+3. **SSH key:** `./otherfiles/id_rsa`
+4. **Git executable on Windows:** `C:\Users\DELL\AppData\Local\GitHubDesktop\app-3.5.4\resources\app\git\cmd\git.exe`
+5. **Read DEPLOY_GUIDE.md first** — It's the comprehensive project brain document
+6. **Python 3.9** is required (not 3.8 or 3.10)
+7. **oradba wrapper** at `/usr/local/bin/oradba` (runs `python3.9 -m oracledba.cli "$@"`)
+8. **User's top priority for next session:** Fix the GUI installation page UX (step-by-step flow, no sync popups, visual progress like a normal installer)
+9. **Workflow:** Edit locally on Windows → push to GitHub → pull on VM → test
+10. **Flask runs on 0.0.0.0:5000** — accessible externally, no firewall blocking
 
 ---
 
-**Status:** ✅ Deployment successful | ⏳ Oracle installation in progress | 🎯 GUI functional
+**Status:** ✅ Oracle 19c installed and running | ✅ CLI working (26 commands) | ✅ GUI running (75 routes) | 🔧 GUI installation UX needs improvement
