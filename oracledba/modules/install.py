@@ -1,16 +1,28 @@
 """
 Oracle Installation Manager
-Handles Oracle 19c installation and system setup
+Single-command Oracle 19c installation with real-time terminal output.
+
+Usage (CLI):
+    oradba install              # Full install with live output
+    oradba install --yes        # Skip confirmation
+    oradba install system       # Just system prep (TP01)
+    oradba install binaries     # Just download+extract (TP02)
+    oradba install software     # Just runInstaller
+    oradba install database     # Just DBCA
+
+Usage (Python):
+    from oracledba.modules.install import InstallManager
+    mgr = InstallManager()
+    mgr.install_all(auto_yes=True)
 """
 
 import os
+import sys
 import subprocess
 import yaml
 import time
 from pathlib import Path
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
-from rich.panel import Panel
 from rich.table import Table
 from rich import print as rprint
 
@@ -21,20 +33,21 @@ class InstallManager:
     def __init__(self, config_file=None):
         self.config = self._load_config(config_file)
         self.scripts_dir = Path(__file__).parent.parent / "scripts"
+        self._log_handle = None
         try:
             self.log_dir = Path("/var/log/oracledba")
             self.log_dir.mkdir(parents=True, exist_ok=True)
         except (PermissionError, OSError):
             self.log_dir = Path("/tmp/oracledba-logs")
             self.log_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def _load_config(self, config_file):
         """Load configuration from YAML file"""
         if config_file and Path(config_file).exists():
             with open(config_file, 'r') as f:
                 return yaml.safe_load(f)
         return self._default_config()
-    
+
     def _default_config(self):
         """Return default configuration"""
         return {
@@ -53,382 +66,510 @@ class InstallManager:
                 'file_id': '1Mi7B2HneMBIyxJ01tnA-ThQ9hr2CAsns'
             }
         }
-    
-    def _run_script(self, script_name, as_user='root', show_output=False, env_vars=None):
-        """Execute a bash script with enhanced logging"""
+
+    # =========================================================================
+    # OUTPUT — everything goes to stdout + log file simultaneously
+    # =========================================================================
+
+    def _out(self, text, end='\n'):
+        """Write text to stdout and log file"""
+        sys.stdout.write(text + end)
+        sys.stdout.flush()
+        if self._log_handle:
+            self._log_handle.write(text + end)
+            self._log_handle.flush()
+
+    def _step_header(self, step_num, total, title):
+        """Print a visible step header"""
+        self._out("")
+        self._out("\u2501" * 60)
+        self._out(f"  Step {step_num}/{total} \u2500 {title}")
+        self._out("\u2501" * 60)
+        self._out("")
+
+    def _step_result(self, step_num, success, elapsed_seconds):
+        """Print step result with timing"""
+        mins = int(elapsed_seconds // 60)
+        secs = int(elapsed_seconds % 60)
+        if success:
+            self._out(f"\n\u2713 Step {step_num} complete ({mins}m {secs}s)")
+        else:
+            self._out(f"\n\u2717 Step {step_num} FAILED ({mins}m {secs}s)")
+
+    def _open_log(self, name):
+        """Open a log file for writing"""
+        log_file = self.log_dir / f"{name}.log"
+        self._log_handle = open(log_file, 'w')
+        return log_file
+
+    def _close_log(self):
+        """Close the log file"""
+        if self._log_handle:
+            self._log_handle.close()
+            self._log_handle = None
+
+    # =========================================================================
+    # PROCESS EXECUTION — always streams output live
+    # =========================================================================
+
+    def _build_env(self, extra_vars=None):
+        """Build environment with Oracle-specific vars"""
+        env = os.environ.copy()
+        env['CV_ASSUME_DISTID'] = 'OEL7.8'
+        if extra_vars:
+            env.update(extra_vars)
+        return env
+
+    def _get_euid(self):
+        """Get effective user ID (safe for Windows)"""
+        try:
+            return os.geteuid()
+        except AttributeError:
+            return -1
+
+    def _build_cmd(self, command_str, as_user='root'):
+        """Build command array. Wraps in su - oracle if needed."""
+        euid = self._get_euid()
+        if as_user == 'oracle' and euid == 0:
+            return ['su', '-', 'oracle', '-c',
+                    f'source ~/.bash_profile 2>/dev/null && {command_str}']
+        else:
+            return ['bash', '-c', command_str]
+
+    def _stream_cmd(self, cmd, env=None):
+        """Execute command, stream every line to _out(). Returns exit code."""
+        if env is None:
+            env = self._build_env()
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env=env, text=True, bufsize=1
+            )
+            for line in process.stdout:
+                self._out(line, end='')
+            process.wait()
+            return process.returncode
+        except Exception as e:
+            self._out(f"Error running command: {e}")
+            return 1
+
+    def _stream_cmd_capture(self, cmd, env=None):
+        """Like _stream_cmd but also returns full output for post-checking."""
+        if env is None:
+            env = self._build_env()
+        output_lines = []
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env=env, text=True, bufsize=1
+            )
+            for line in process.stdout:
+                self._out(line, end='')
+                output_lines.append(line)
+            process.wait()
+            return process.returncode, ''.join(output_lines)
+        except Exception as e:
+            self._out(f"Error running command: {e}")
+            return 1, str(e)
+
+    def _run_script(self, script_name, as_user='root', env_vars=None, show_output=True):
+        """Execute a bash script with live output streaming.
+
+        show_output is kept for backward compat but output always streams now.
+        """
         script_path = self.scripts_dir / script_name
         if not script_path.exists():
-            rprint(f"[red]Error:[/red] Script {script_name} not found at {script_path}")
+            self._out(f"\u2717 Error: Script {script_name} not found at {script_path}")
             return False
-        
+
+        env = self._build_env(env_vars)
+        cmd = self._build_cmd(f'bash {script_path}', as_user)
+
         log_file = self.log_dir / f"{script_name}.log"
-        
-        try:
-            # Prepare environment variables
-            env = os.environ.copy()
-            if env_vars:
-                env.update(env_vars)
-            
-            # Always set CV_ASSUME_DISTID for Oracle compatibility
-            env['CV_ASSUME_DISTID'] = 'OEL7.8'
-            
-            # Build command - safe check for geteuid (Windows compat)
-            try:
-                euid = os.geteuid()
-            except AttributeError:
-                euid = -1  # Not on Linux, just run directly
-            
-            if as_user == 'oracle' and euid == 0:
-                cmd = ['su', '-', 'oracle', '-c', f'source ~/.bash_profile && bash {script_path}']
-            elif as_user == 'root' or euid != 0:
-                cmd = ['bash', str(script_path)]
-            else:
-                cmd = ['su', '-', as_user, '-c', f'bash {script_path}']
-            
-            # Execute with real-time output if requested
-            if show_output:
-                process = subprocess.Popen(
-                    cmd, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    text=True,
-                    bufsize=1
-                )
-                
-                with open(log_file, 'w') as log:
-                    for line in process.stdout:
-                        print(line, end='')
-                        log.write(line)
-                
-                process.wait()
-                returncode = process.returncode
-            else:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    env=env
-                )
-                returncode = result.returncode
-                
-                # Save output to log
-                with open(log_file, 'w') as log:
-                    log.write(result.stdout)
-                    log.write(result.stderr)
-            
-            if returncode == 0:
-                rprint(f"[green]✓[/green] {script_name} completed successfully")
-                rprint(f"[dim]  Log: {log_file}[/dim]")
-                return True
-            else:
-                rprint(f"[red]✗[/red] {script_name} failed (exit code: {returncode})")
-                rprint(f"[yellow]  Check log:[/yellow] {log_file}")
-                if not show_output:
-                    rprint("\n[yellow]Last 20 lines of output:[/yellow]")
-                    with open(log_file) as log:
-                        lines = log.readlines()
-                        for line in lines[-20:]:
-                            print(line, end='')
-                return False
-        except Exception as e:
-            rprint(f"[red]Error executing {script_name}:[/red] {str(e)}")
+        self._out(f"  Script: {script_name}")
+        self._out(f"  Log:    {log_file}")
+        self._out("")
+
+        returncode = self._stream_cmd(cmd, env)
+
+        if returncode == 0:
+            self._out(f"\n\u2713 {script_name} completed successfully")
+            return True
+        else:
+            self._out(f"\n\u2717 {script_name} failed (exit code: {returncode})")
             return False
-    
-    def install_all(self, skip_system=False, skip_binaries=False, skip_db_creation=False, verbose=False):
-        """Complete Oracle 19c installation - One button install"""
-        console.print(Panel.fit(
-            "[bold cyan]Oracle 19c Complete Installation[/bold cyan]\n"
-            "This will install Oracle Database 19c on Rocky Linux 8\n"
-            "Estimated time: 30-45 minutes",
-            border_style="cyan"
-        ))
-        
-        # Define installation steps
-        steps = []
-        
-        if not skip_system:
-            steps.append({
-                'name': 'System Readiness',
-                'script': 'tp01-system-readiness.sh',
-                'user': 'root',
-                'description': 'Configure system (users, groups, kernel params, packages)',
-                'duration': '5-10 min'
-            })
-        
-        if not skip_binaries:
-            steps.append({
-                'name': 'Binary Installation',
-                'script': 'tp02-installation-binaire.sh',
-                'user': 'oracle',
-                'description': 'Download and extract Oracle 19c binaries (3GB)',
-                'duration': '5-10 min'
-            })
-            
-            steps.append({
-                'name': 'Software Installation',
-                'script': None,  # Will be handled separately
-                'user': 'oracle',
-                'description': 'Install Oracle software (runInstaller)',
-                'duration': '10-15 min'
-            })
-        
-        if not skip_db_creation:
-            steps.append({
-                'name': 'Database Creation',
-                'script': None,  # Will be handled separately
-                'user': 'oracle',
-                'description': 'Create GDCPROD database with DBCA',
-                'duration': '10-15 min'
-            })
-        
-        # Show installation plan
-        table = Table(title="Installation Plan", show_header=True, header_style="bold magenta")
-        table.add_column("Step", style="cyan")
-        table.add_column("Description", style="white")
-        table.add_column("Duration", style="yellow")
-        
-        for i, step in enumerate(steps, 1):
-            table.add_row(f"{i}. {step['name']}", step['description'], step['duration'])
-        
-        console.print(table)
-        console.print("\n[yellow]Press Ctrl+C to cancel, or wait 5 seconds to continue...[/yellow]")
-        
-        try:
-            time.sleep(5)
-        except KeyboardInterrupt:
-            rprint("\n[red]Installation cancelled by user[/red]")
-            return False
-        
-        # Execute installation steps
-        for i, step in enumerate(steps, 1):
-            console.print(f"\n[bold cyan]═══ Step {i}/{len(steps)}: {step['name']} ═══[/bold cyan]")
-            
-            if step['script']:
-                # Standard script execution
-                success = self._run_script(step['script'], step['user'], show_output=verbose)
-                if not success:
-                    rprint(f"\n[red]✗ Installation failed at: {step['name']}[/red]")
-                    return False
-            else:
-                # Special handling for software install and DB creation
-                if 'Software Installation' in step['name']:
-                    success = self._install_oracle_software()
-                elif 'Database Creation' in step['name']:
-                    success = self._create_database_dbca()
-                
-                if not success:
-                    rprint(f"\n[red]✗ Installation failed at: {step['name']}[/red]")
-                    return False
-        
-        # Success message
-        console.print(Panel.fit(
-            "[bold green]✓ Oracle 19c Installation Completed Successfully![/bold green]\n\n"
-            "Database Information:\n"
-            f"  • Database Name: {self.config['database']['db_name']}\n"
-            f"  • SID: {self.config['database']['sid']}\n"
-            f"  • PDB Name: {self.config['database']['pdb_name']}\n"
-            f"  • ORACLE_HOME: {self.config['oracle']['oracle_home']}\n\n"
-            "Login with:\n"
-            "  [cyan]sqlplus / as sysdba[/cyan]\n"
-            "  [cyan]sqlplus sys/Oracle123@//localhost/GDCPDB as sysdba[/cyan]",
-            border_style="green"
-        ))
-        
-        return True
-    
-    def install_full(self, skip_system=False, skip_binaries=False, skip_db_creation=False):
-        """Alias for install_all for backward compatibility"""
-        return self.install_all(skip_system, skip_binaries, skip_db_creation, verbose=True)
-    
-    def _install_oracle_software(self):
-        """Install Oracle software using runInstaller"""
-        rprint("[cyan]Installing Oracle Database 19c software...[/cyan]")
-        
+
+    # =========================================================================
+    # INSTALLATION STEPS — each one does ONE thing with full live output
+    # =========================================================================
+
+    def _step_system(self):
+        """Step 1: System readiness — users, groups, kernel, packages (TP01)"""
+        return self._run_script('tp01-system-readiness.sh', 'root')
+
+    def _step_binaries(self):
+        """Step 2: Download and extract Oracle binaries (TP02)"""
+        return self._run_script('tp02-installation-binaire.sh', 'oracle')
+
+    def _step_software(self):
+        """Step 3: Install Oracle software with runInstaller + root scripts"""
         oracle_home = self.config['oracle']['oracle_home']
-        
-        # Create response file
+        oracle_base = self.config['oracle']['oracle_base']
+
+        # --- Create response file ---
+        self._out("Creating response file for silent install...")
         response_file = "/tmp/db_install.rsp"
-        response_content = f"""oracle.install.responseFileVersion=/oracle/install/rspfmt_dbinstall_response_schema_v19.0.0
-oracle.install.option=INSTALL_DB_SWONLY
-UNIX_GROUP_NAME=oinstall
-INVENTORY_LOCATION=/u01/app/oraInventory
-ORACLE_HOME={oracle_home}
-ORACLE_BASE={self.config['oracle']['oracle_base']}
-oracle.install.db.InstallEdition=EE
-oracle.install.db.OSDBA_GROUP=dba
-oracle.install.db.OSOPER_GROUP=oper
-oracle.install.db.OSBACKUPDBA_GROUP=backupdba
-oracle.install.db.OSDGDBA_GROUP=dgdba
-oracle.install.db.OSKMDBA_GROUP=kmdba
-oracle.install.db.OSRACDBA_GROUP=racdba
-SECURITY_UPDATES_VIA_MYORACLESUPPORT=false
-DECLINE_SECURITY_UPDATES=true
-"""
-        
+        response_content = (
+            "oracle.install.responseFileVersion="
+            "/oracle/install/rspfmt_dbinstall_response_schema_v19.0.0\n"
+            "oracle.install.option=INSTALL_DB_SWONLY\n"
+            "UNIX_GROUP_NAME=oinstall\n"
+            "INVENTORY_LOCATION=/u01/app/oraInventory\n"
+            f"ORACLE_HOME={oracle_home}\n"
+            f"ORACLE_BASE={oracle_base}\n"
+            "oracle.install.db.InstallEdition=EE\n"
+            "oracle.install.db.OSDBA_GROUP=dba\n"
+            "oracle.install.db.OSOPER_GROUP=oper\n"
+            "oracle.install.db.OSBACKUPDBA_GROUP=backupdba\n"
+            "oracle.install.db.OSDGDBA_GROUP=dgdba\n"
+            "oracle.install.db.OSKMDBA_GROUP=kmdba\n"
+            "oracle.install.db.OSRACDBA_GROUP=racdba\n"
+            "SECURITY_UPDATES_VIA_MYORACLESUPPORT=false\n"
+            "DECLINE_SECURITY_UPDATES=true\n"
+        )
         with open(response_file, 'w') as f:
             f.write(response_content)
-        
-        rprint(f"[dim]Response file created: {response_file}[/dim]")
-        
-        # Run installer
-        install_cmd = [
-            'su', '-', 'oracle', '-c',
-            f'export CV_ASSUME_DISTID=OEL7.8 && cd {oracle_home} && '
-            f'./runInstaller -silent -responseFile {response_file} -waitforcompletion -ignorePrereq'
-        ]
-        
-        try:
-            result = subprocess.run(install_cmd, capture_output=True, text=True)
-            
-            if "Successfully Setup Software" in result.stdout:
-                rprint("[green]✓[/green] Oracle software installed successfully")
-                
-                # Run root scripts
-                rprint("\n[yellow]Running root configuration scripts...[/yellow]")
-                
-                subprocess.run(['/u01/app/oraInventory/orainstRoot.sh'], check=True)
-                rprint("[green]✓[/green] orainstRoot.sh completed")
-                
-                subprocess.run([f'{oracle_home}/root.sh'], check=True)
-                rprint("[green]✓[/green] root.sh completed")
-                
-                return True
-            else:
-                rprint("[red]✗[/red] Oracle software installation failed")
-                rprint(result.stdout)
-                return False
-                
-        except Exception as e:
-            rprint(f"[red]Error during software installation:[/red] {str(e)}")
+        self._out(f"\u2713 Response file: {response_file}\n")
+
+        # --- Run installer ---
+        self._out("Running Oracle runInstaller (this takes ~10 minutes)...")
+        self._out(f"  ORACLE_HOME: {oracle_home}\n")
+
+        install_cmd = (
+            f'export CV_ASSUME_DISTID=OEL7.8 && '
+            f'cd {oracle_home} && '
+            f'./runInstaller -silent '
+            f'-responseFile {response_file} '
+            f'-waitforcompletion -ignorePrereq'
+        )
+        cmd = self._build_cmd(install_cmd, 'oracle')
+        returncode, output = self._stream_cmd_capture(cmd)
+
+        # runInstaller returns 6 for "Successfully Setup Software with warnings"
+        if "Successfully Setup Software" in output or returncode in (0, 6):
+            self._out("\n\u2713 Oracle software installed successfully")
+        else:
+            self._out(f"\n\u2717 Oracle software installation failed (exit code: {returncode})")
             return False
-    
-    def _create_database_dbca(self):
-        """Create database using DBCA"""
-        rprint("[cyan]Creating Oracle database with DBCA...[/cyan]")
-        rprint("[yellow]This may take 10-15 minutes. Please wait...[/yellow]")
-        
+
+        # --- Run root scripts ---
+        self._out("\nRunning root configuration scripts...\n")
+
+        orainstRoot = '/u01/app/oraInventory/orainstRoot.sh'
+        root_sh = f'{oracle_home}/root.sh'
+
+        if os.path.exists(orainstRoot):
+            self._out(f"\u2192 {orainstRoot}")
+            rc = self._stream_cmd(['bash', orainstRoot])
+            if rc == 0:
+                self._out("\u2713 orainstRoot.sh completed")
+            else:
+                self._out(f"\u26a0 orainstRoot.sh returned {rc} (continuing)")
+        else:
+            self._out(f"\u26a0 {orainstRoot} not found, skipping")
+
+        if os.path.exists(root_sh):
+            self._out(f"\n\u2192 {root_sh}")
+            rc = self._stream_cmd(['bash', root_sh])
+            if rc == 0:
+                self._out("\u2713 root.sh completed")
+            else:
+                self._out(f"\u26a0 root.sh returned {rc} (continuing)")
+        else:
+            self._out(f"\u26a0 {root_sh} not found, skipping")
+
+        return True
+
+    def _step_database(self):
+        """Step 4: Create database — listener + DBCA"""
         db_config = self.config['database']
-        
-        # Create listener first
-        rprint("\n[cyan]1/2: Setting up Oracle Listener...[/cyan]")
-        listener_config = f"""/u01/app/oracle/product/19.3.0/dbhome_1/network/admin/listener.ora"""
-        
-        listener_cmd = [
-            'su', '-', 'oracle', '-c',
-            f"""mkdir -p /u01/app/oracle/product/19.3.0/dbhome_1/network/admin && \
-cat > /u01/app/oracle/product/19.3.0/dbhome_1/network/admin/listener.ora << 'EOF'
-LISTENER =
-  (DESCRIPTION_LIST =
-    (DESCRIPTION =
-      (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
-      (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
-    )
-  )
+        oracle_home = self.config['oracle']['oracle_home']
+        oracle_base = self.config['oracle']['oracle_base']
 
-SID_LIST_LISTENER =
-  (SID_LIST =
-    (SID_DESC =
-      (GLOBAL_DBNAME = {db_config['db_name']})
-      (ORACLE_HOME = {self.config['oracle']['oracle_home']})
-      (SID_NAME = {db_config['sid']})
-    )
-  )
+        # --- Write listener.ora from Python (we are root) ---
+        self._out("Setting up Oracle Listener...\n")
 
-ADR_BASE_LISTENER = {self.config['oracle']['oracle_base']}
-EOF
-lsnrctl start"""
-        ]
-        
+        listener_dir = Path(f"{oracle_home}/network/admin")
         try:
-            subprocess.run(listener_cmd, check=True)
-            rprint("[green]\u2713[/green] Listener started successfully")
-        except Exception:
-            rprint("[yellow]⚠[/yellow] Listener start had issues, continuing...")
-        
-        # Create database with DBCA
-        rprint("\n[cyan]2/2: Creating database with DBCA...[/cyan]")
-        
-        dbca_cmd = [
-            'su', '-', 'oracle', '-c',
-            f"""export CV_ASSUME_DISTID=OEL7.8 && \
-dbca -silent -createDatabase \
-  -templateName General_Purpose.dbc \
-  -gdbName {db_config['db_name']} \
-  -sid {db_config['sid']} \
-  -createAsContainerDatabase true \
-  -numberOfPDBs 1 \
-  -pdbName {db_config['pdb_name']} \
-  -sysPassword {db_config['sys_password']} \
-  -systemPassword {db_config['sys_password']} \
-  -pdbAdminPassword {db_config['sys_password']} \
-  -datafileDestination {self.config['oracle']['oracle_base']}/oradata \
-  -recoveryAreaDestination {self.config['oracle']['oracle_base']}/fast_recovery_area \
-  -storageType FS \
-  -characterSet AL32UTF8 \
-  -nationalCharacterSet AL16UTF16 \
-  -totalMemory 2048 \
-  -emConfiguration NONE"""
-        ]
-        
+            listener_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            pass
+
+        listener_content = (
+            "LISTENER =\n"
+            "  (DESCRIPTION_LIST =\n"
+            "    (DESCRIPTION =\n"
+            "      (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))\n"
+            "      (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))\n"
+            "    )\n"
+            "  )\n\n"
+            "SID_LIST_LISTENER =\n"
+            "  (SID_LIST =\n"
+            "    (SID_DESC =\n"
+            f"      (GLOBAL_DBNAME = {db_config['db_name']})\n"
+            f"      (ORACLE_HOME = {oracle_home})\n"
+            f"      (SID_NAME = {db_config['sid']})\n"
+            "    )\n"
+            "  )\n\n"
+            f"ADR_BASE_LISTENER = {oracle_base}\n"
+        )
+
+        listener_path = listener_dir / 'listener.ora'
         try:
-            result = subprocess.run(dbca_cmd, capture_output=True, text=True, timeout=1800)
-            
-            if result.returncode == 0 or "100% complete" in result.stdout:
-                rprint("[green]✓[/green] Database created successfully!")
-                
-                # Verify database
-                rprint("\n[cyan]Verifying database...[/cyan]")
-                verify_cmd = [
-                    'su', '-', 'oracle', '-c',
-                    "sqlplus -s / as sysdba << 'EOF'\nSET PAGESIZE 0 FEEDBACK OFF\nSELECT 'DB: ' || name || ' - ' || open_mode FROM v\\$database;\nSELECT 'PDB: ' || name || ' - ' || open_mode FROM v\\$pdbs WHERE name != 'PDB\\$SEED';\nEXIT\nEOF"
-                ]
-                
-                verify_result = subprocess.run(verify_cmd, capture_output=True, text=True)
-                rprint(verify_result.stdout)
-                
-                return True
-            else:
-                rprint("[red]✗[/red] Database creation failed")
-                rprint(result.stdout)
-                rprint(result.stderr)
-                return False
-                
-        except subprocess.TimeoutExpired:
-            rprint("[red]✗[/red] Database creation timed out (>30 min)")
+            listener_path.write_text(listener_content)
+            subprocess.run(['chown', '-R', 'oracle:oinstall', str(listener_dir)],
+                           capture_output=True, check=False)
+            self._out(f"\u2713 listener.ora written to {listener_path}")
+        except (PermissionError, OSError) as e:
+            self._out(f"\u26a0 Could not write listener.ora directly: {e}")
+            self._out("  Trying via su - oracle...")
+            lsn_cmd = (
+                f"mkdir -p {oracle_home}/network/admin && "
+                f"cat > {listener_path} << 'LSNEOF'\n{listener_content}LSNEOF"
+            )
+            self._stream_cmd(self._build_cmd(lsn_cmd, 'oracle'))
+
+        # Start listener as oracle
+        cmd = self._build_cmd('lsnrctl start', 'oracle')
+        rc = self._stream_cmd(cmd)
+        if rc == 0:
+            self._out("\n\u2713 Listener started")
+        else:
+            self._out("\n\u26a0 Listener start had issues (may already be running), continuing...")
+
+        # --- DBCA ---
+        self._out(f"\nCreating database {db_config['db_name']} with DBCA...")
+        self._out("This takes 10-15 minutes. Watch the progress below.\n")
+
+        dbca_cmd = (
+            f"export CV_ASSUME_DISTID=OEL7.8 && "
+            f"dbca -silent -createDatabase "
+            f"-templateName General_Purpose.dbc "
+            f"-gdbName {db_config['db_name']} "
+            f"-sid {db_config['sid']} "
+            f"-createAsContainerDatabase true "
+            f"-numberOfPDBs 1 "
+            f"-pdbName {db_config['pdb_name']} "
+            f"-sysPassword {db_config['sys_password']} "
+            f"-systemPassword {db_config['sys_password']} "
+            f"-pdbAdminPassword {db_config['sys_password']} "
+            f"-datafileDestination {oracle_base}/oradata "
+            f"-recoveryAreaDestination {oracle_base}/fast_recovery_area "
+            f"-storageType FS "
+            f"-characterSet AL32UTF8 "
+            f"-nationalCharacterSet AL16UTF16 "
+            f"-totalMemory 2048 "
+            f"-emConfiguration NONE"
+        )
+
+        cmd = self._build_cmd(dbca_cmd, 'oracle')
+        returncode, output = self._stream_cmd_capture(cmd)
+
+        if returncode == 0 or "100% complete" in output.lower():
+            self._out("\n\u2713 Database created successfully!")
+
+            # Verify database
+            self._out("\nVerifying database...\n")
+            verify_cmd = (
+                "sqlplus -s / as sysdba << 'EOF'\n"
+                "SET PAGESIZE 0 FEEDBACK OFF\n"
+                "SELECT 'DB: ' || name || ' - ' || open_mode FROM v$database;\n"
+                "SELECT 'PDB: ' || name || ' - ' || open_mode FROM v$pdbs "
+                "WHERE name != 'PDB$SEED';\n"
+                "EXIT\nEOF"
+            )
+            cmd = self._build_cmd(verify_cmd, 'oracle')
+            self._stream_cmd(cmd)
+
+            # Add to /etc/oratab
+            oratab_line = f"{db_config['sid']}:{oracle_home}:Y"
+            try:
+                existing = ''
+                if os.path.exists('/etc/oratab'):
+                    with open('/etc/oratab', 'r') as f:
+                        existing = f.read()
+                if db_config['sid'] not in existing:
+                    with open('/etc/oratab', 'a') as f:
+                        f.write(f"\n{oratab_line}\n")
+                    self._out(f"\u2713 Added {db_config['sid']} to /etc/oratab")
+            except Exception:
+                self._out(f"\u26a0 Could not update /etc/oratab (add: {oratab_line})")
+
+            return True
+        else:
+            self._out(f"\n\u2717 Database creation failed (exit code: {returncode})")
             return False
-        except Exception as e:
-            rprint(f"[red]Error during database creation:[/red] {str(e)}")
-            return False
-    
+
+    # =========================================================================
+    # MAIN INSTALL — single command, 4 steps, full live output
+    # =========================================================================
+
+    def install_all(self, skip_system=False, skip_binaries=False,
+                    skip_db_creation=False, verbose=False, auto_yes=False):
+        """Complete Oracle 19c installation - one command, live output.
+
+        This is the main entry point for: oradba install
+        """
+        log_file = self._open_log("install-all")
+
+        try:
+            # Banner
+            self._out("\u2554" + "\u2550" * 53 + "\u2557")
+            self._out("\u2551   Oracle 19c \u2500 Complete Automated Installation     \u2551")
+            self._out("\u2551   oradba install                                   \u2551")
+            self._out("\u255a" + "\u2550" * 53 + "\u255d")
+            self._out("")
+
+            # Build step list
+            steps = []
+            if not skip_system:
+                steps.append(('System Readiness',
+                              'Users, groups, kernel params, 50+ packages',
+                              self._step_system))
+            if not skip_binaries:
+                steps.append(('Download & Extract Binaries',
+                              'Download 3GB from Google Drive, extract to ORACLE_HOME',
+                              self._step_binaries))
+                steps.append(('Install Oracle Software',
+                              'runInstaller (silent) + root scripts',
+                              self._step_software))
+            if not skip_db_creation:
+                steps.append(('Create Database',
+                              'Listener + DBCA \u2192 GDCPROD (CDB) + GDCPDB (PDB)',
+                              self._step_database))
+
+            # Show plan
+            self._out(f"  {len(steps)} steps to execute:\n")
+            for i, (title, desc, _) in enumerate(steps, 1):
+                self._out(f"    {i}. {title}")
+                self._out(f"       {desc}")
+            self._out(f"\n  Log file: {log_file}")
+            self._out("")
+
+            # Confirmation
+            if not auto_yes:
+                self._out("Press Enter to start, Ctrl+C to cancel...")
+                try:
+                    input()
+                except KeyboardInterrupt:
+                    self._out("\n\u2717 Installation cancelled by user")
+                    return False
+
+            total_start = time.time()
+
+            # Execute steps
+            for i, (title, _desc, func) in enumerate(steps, 1):
+                self._step_header(i, len(steps), title)
+                step_start = time.time()
+
+                success = func()
+
+                elapsed = time.time() - step_start
+                self._step_result(i, success, elapsed)
+
+                if not success:
+                    self._out(f"\n\u2717 Installation FAILED at step {i}: {title}")
+                    self._out(f"  Check log: {log_file}")
+                    return False
+
+            # Success
+            total_elapsed = time.time() - total_start
+            total_mins = int(total_elapsed // 60)
+            total_secs = int(total_elapsed % 60)
+
+            db = self.config['database']
+            self._out("")
+            self._out("\u2550" * 60)
+            self._out("  \u2713 Oracle 19c Installation Complete!")
+            self._out(f"  Total Time: {total_mins}m {total_secs}s")
+            self._out("\u2550" * 60)
+            self._out("")
+            self._out(f"  Database: {db['db_name']}")
+            self._out(f"  SID:      {db['sid']}")
+            self._out(f"  PDB:      {db['pdb_name']}")
+            self._out(f"  Home:     {self.config['oracle']['oracle_home']}")
+            self._out(f"  Listener: port 1521")
+            self._out("")
+            self._out("  Connect:")
+            self._out("    sqlplus / as sysdba")
+            self._out(f"    sqlplus sys/{db['sys_password']}@//localhost/{db['pdb_name']} as sysdba")
+            self._out("")
+            self._out(f"  Log: {log_file}")
+            self._out("\u2550" * 60)
+
+            return True
+
+        finally:
+            self._close_log()
+
+    def install_full(self, skip_system=False, skip_binaries=False,
+                     skip_db_creation=False):
+        """Alias for install_all with verbose=True (backward compat)"""
+        return self.install_all(skip_system, skip_binaries, skip_db_creation,
+                                verbose=True, auto_yes=False)
+
+    # =========================================================================
+    # INDIVIDUAL INSTALL COMMANDS — for CLI subcommands
+    # =========================================================================
+
     def install_system(self):
-        """Install system prerequisites"""
-        console.print("\n[bold cyan]Installing System Prerequisites[/bold cyan]\n")
-        return self._run_script("tp01-system-readiness.sh", "root", show_output=True)
-    
+        """Install system prerequisites only (TP01)"""
+        log_file = self._open_log("install-system")
+        try:
+            self._out("\u2550\u2550\u2550 Installing System Prerequisites \u2550\u2550\u2550\n")
+            return self._step_system()
+        finally:
+            self._close_log()
+
     def install_binaries(self):
-        """Install Oracle binaries"""
-        console.print("\n[bold cyan]Installing Oracle Binaries[/bold cyan]\n")
-        success = self._run_script("tp02-installation-binaire.sh", "oracle", show_output=True)
-        if success:
-            rprint("\n[yellow]Now run root scripts:[/yellow]")
-            rprint("  sudo /u01/app/oraInventory/orainstRoot.sh")
-            rprint("  sudo $ORACLE_HOME/root.sh")
-            rprint("\n[yellow]Then install software:[/yellow]")
-            rprint("  oradba install software")
-        return success
-    
+        """Download and extract Oracle binaries only (TP02)"""
+        log_file = self._open_log("install-binaries")
+        try:
+            self._out("\u2550\u2550\u2550 Installing Oracle Binaries \u2550\u2550\u2550\n")
+            success = self._step_binaries()
+            if success:
+                self._out("\nNext step: oradba install software")
+            return success
+        finally:
+            self._close_log()
+
+    def install_software(self):
+        """Install Oracle software only (runInstaller + root scripts)"""
+        log_file = self._open_log("install-software")
+        try:
+            self._out("\u2550\u2550\u2550 Installing Oracle Software \u2550\u2550\u2550\n")
+            return self._step_software()
+        finally:
+            self._close_log()
+
     def create_database(self, db_name=None):
-        """Create Oracle database"""
+        """Create Oracle database only (Listener + DBCA)"""
         if db_name:
             self.config['database']['sid'] = db_name
             self.config['database']['db_name'] = db_name
-        
-        console.print("\n[bold cyan]Creating Oracle Database[/bold cyan]\n")
-        return self._create_database_dbca()
-    
-    def run_lab(self, lab_number, show_output=False):
-        """Run specific configuration lab script"""
+        log_file = self._open_log("install-database")
+        try:
+            self._out("\u2550\u2550\u2550 Creating Oracle Database \u2550\u2550\u2550\n")
+            return self._step_database()
+        finally:
+            self._close_log()
+
+    # =========================================================================
+    # LAB RUNNER — run TP04-TP15 configuration labs
+    # =========================================================================
+
+    def run_lab(self, lab_number, show_output=True):
+        """Run a specific configuration lab script"""
         lab_map = {
             '01': ('tp01-system-readiness.sh', 'root', 'System Readiness'),
             '02': ('tp02-installation-binaire.sh', 'oracle', 'Binary Installation'),
@@ -446,24 +587,25 @@ dbca -silent -createDatabase \
             '14': ('tp14-mobilite-concurrence.sh', 'oracle', 'Data Mobility'),
             '15': ('tp15-asm-rac-concepts.sh', 'oracle', 'ASM and RAC Concepts'),
         }
-        
+
         if lab_number not in lab_map:
             rprint(f"[red]Error:[/red] Lab {lab_number} not found")
             rprint(f"[yellow]Available labs:[/yellow] {', '.join(sorted(lab_map.keys()))}")
             return False
-        
+
         script, user, description = lab_map[lab_number]
-        console.print(f"\n[bold cyan]Running Lab: {description}[/bold cyan]\n")
-        return self._run_script(script, user, show_output=show_output)
-    
+        rprint(f"\n[bold cyan]Running Lab {lab_number}: {description}[/bold cyan]\n")
+        return self._run_script(script, user)
+
     def list_labs(self):
         """List all available configuration labs"""
-        table = Table(title="Oracle DBA Configuration Labs", show_header=True, header_style="bold magenta")
+        table = Table(title="Oracle DBA Configuration Labs",
+                      show_header=True, header_style="bold magenta")
         table.add_column("#", style="cyan", width=4)
         table.add_column("Name", style="white")
         table.add_column("Description", style="dim")
         table.add_column("Category", style="yellow")
-        
+
         labs = [
             ("01", "System Readiness", "User, groups, packages, kernel params", "Installation"),
             ("02", "Binary Installation", "Download and extract Oracle 19c", "Installation"),
@@ -481,25 +623,25 @@ dbca -silent -createDatabase \
             ("14", "Data Mobility", "Data Pump, transportable tablespaces", "Advanced"),
             ("15", "ASM/RAC", "Clustering and ASM concepts", "Advanced"),
         ]
-        
+
         for lab_num, name, desc, category in labs:
             table.add_row(lab_num, name, desc, category)
-        
+
         console.print(table)
-        console.print("\n[cyan]Usage with CLI commands:[/cyan]")
-        console.print("  oradba configure multiplexing    # Run Lab 04")
-        console.print("  oradba configure storage         # Run Lab 05")
-        console.print("  oradba configure backup          # Run Lab 08")
-        console.print("  oradba maintenance tune          # Run Lab 10")
-        console.print("  oradba advanced multitenant      # Run Lab 12")
-    
+        console.print("\n[cyan]Usage:[/cyan]")
+        console.print("  oradba configure multiplexing    # Lab 04")
+        console.print("  oradba configure storage         # Lab 05")
+        console.print("  oradba configure backup          # Lab 08")
+        console.print("  oradba maintenance tune          # Lab 10")
+        console.print("  oradba advanced multitenant      # Lab 12")
+
     def run_all_labs(self, start_from='01', end_at='15'):
         """Run multiple labs sequentially"""
         console.print("\n[bold cyan]Running Oracle DBA Configuration Labs[/bold cyan]\n")
-        
-        all_labs = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15']
-        
-        # Filter labs by range
+
+        all_labs = ['01', '02', '03', '04', '05', '06', '07',
+                    '08', '09', '10', '11', '12', '13', '14', '15']
+
         try:
             start_idx = all_labs.index(start_from)
             end_idx = all_labs.index(end_at) + 1
@@ -508,31 +650,28 @@ dbca -silent -createDatabase \
         except ValueError:
             rprint(f"[red]Invalid lab range: {start_from} to {end_at}[/red]")
             return False
-        
+
         failed_labs = []
-        
         for lab_num in labs:
-            success = self.run_lab(lab_num, show_output=False)
+            success = self.run_lab(lab_num)
             if not success:
                 failed_labs.append(lab_num)
-                rprint(f"\n[red]✗ Lab {lab_num} failed. Continue? (y/N)[/red]")
+                rprint(f"\n[red]\u2717 Lab {lab_num} failed. Continue? (y/N)[/red]")
                 response = input().strip().lower()
                 if response != 'y':
                     break
-        
-        # Summary
-        console.print("\n[bold cyan]═══ Configuration Summary ═══[/bold cyan]")
+
+        console.print("\n[bold cyan]\u2550\u2550\u2550 Configuration Summary \u2550\u2550\u2550[/bold cyan]")
         if failed_labs:
             rprint(f"[yellow]Failed labs:[/yellow] {', '.join(failed_labs)}")
         else:
-            rprint("[green]✓ All labs completed successfully![/green]")
-        
+            rprint("[green]\u2713 All labs completed successfully![/green]")
+
         return len(failed_labs) == 0
-    
+
     def vm_init(self, role, node_number=None):
         """Initialize VM for Oracle"""
         console.print(f"\n[bold cyan]Initializing VM as {role}[/bold cyan]\n")
-        
         if role == 'database':
             return self.install_system()
         elif role == 'rac-node':
@@ -541,5 +680,4 @@ dbca -silent -createDatabase \
         elif role == 'dataguard-standby':
             rprint("[cyan]Setting up Data Guard standby[/cyan]")
             return self._run_script("tp09-dataguard.sh", "oracle")
-        
         return False

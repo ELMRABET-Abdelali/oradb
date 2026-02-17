@@ -1255,78 +1255,26 @@ def api_installation_database():
 @login_required
 @admin_required
 def api_installation_quick():
-    """Quick one-click installation - runs TP01+TP02+TP03 in sequence"""
+    """One-click installation — runs oradba install --yes (same code path as CLI)"""
     try:
-        scripts_dir = Path(__file__).parent / 'scripts'
-        
-        # Build a master script that runs all 3 TPs using the actual scripts
-        script_content = f"""#!/bin/bash
-set -e
+        log_file = '/tmp/oracle-install-all.log'
 
-echo "=============================================="
-echo "  ORACLE 19c - AUTOMATED INSTALLATION"
-echo "  Using TP Scripts (Direct Execution)"
-echo "  Started: $(date)"
-echo "=============================================="
-echo ""
-
-log() {{
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}}
-
-# ===== STEP 1/3: System Readiness (TP01) =====
-log "STEP 1/3: Running TP01 - System Readiness..."
-echo ""
-bash {scripts_dir}/tp01-system-readiness.sh
-echo ""
-log "✓ TP01 System Readiness complete"
-echo ""
-
-# ===== STEP 2/3: Binary Installation (TP02) =====
-log "STEP 2/3: Running TP02 - Binary Installation..."
-echo ""
-su - oracle -c "source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8; bash {scripts_dir}/tp02-installation-binaire.sh"
-echo ""
-log "✓ TP02 Binary Installation complete"
-echo ""
-
-# ===== STEP 3/3: Database Creation (TP03) =====
-log "STEP 3/3: Running TP03 - Database Creation..."
-echo ""
-su - oracle -c "source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8; bash {scripts_dir}/tp03-creation-instance.sh"
-echo ""
-log "✓ TP03 Database Creation complete"
-echo ""
-
-echo "=============================================="
-echo "  ✓ INSTALLATION COMPLETE!"
-echo "  Finished: $(date)"
-echo "=============================================="
-echo ""
-echo "You can now connect with:"
-echo "  su - oracle"
-echo "  sqlplus / as sysdba"
-echo ""
-"""
-        
-        script_path = '/tmp/oracle-quick-install.sh'
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        
-        os.chmod(script_path, 0o755)
-        
-        # Execute script in background
-        cmd = f"nohup bash {script_path} > /tmp/oracle-quick-install.log 2>&1 &"
+        # Use the unified CLI command so both CLI and GUI share identical logic.
+        # oradba install --yes  →  InstallManager.install_all(auto_yes=True)
+        # stdout is redirected to the log file; install.py also writes its own
+        # log under /var/log/oracledba/install-all.log.
+        cmd = f"nohup oradba install --yes > {log_file} 2>&1 &"
         subprocess.Popen(cmd, shell=True)
-        
+
         return jsonify({
             'success': True,
-            'message': 'Automated installation started (TP01+TP02+TP03)! This will take 30-60 minutes.',
-            'log_file': '/tmp/oracle-quick-install.log',
+            'message': 'Automated installation started (oradba install --yes). This will take 30-60 minutes.',
+            'log_file': log_file,
             'steps': [
-                {'step': 1, 'name': 'TP01: System Readiness', 'status': 'running'},
-                {'step': 2, 'name': 'TP02: Binary Installation', 'status': 'pending'},
-                {'step': 3, 'name': 'TP03: Database Creation', 'status': 'pending'}
+                {'step': 1, 'name': 'System Readiness', 'status': 'running'},
+                {'step': 2, 'name': 'Download & Extract Binaries', 'status': 'pending'},
+                {'step': 3, 'name': 'Install Oracle Software', 'status': 'pending'},
+                {'step': 4, 'name': 'Create Database', 'status': 'pending'}
             ]
         })
     except Exception as e:
@@ -1337,7 +1285,7 @@ echo ""
 @login_required
 @admin_required
 def api_installation_logs(log_type):
-    """Get installation logs"""
+    """Get installation logs with step-progress detection"""
     import subprocess
     try:
         log_files = {
@@ -1345,7 +1293,7 @@ def api_installation_logs(log_type):
             'system': '/tmp/tp01.log',
             'binaries': '/tmp/tp02.log',
             'database': '/tmp/tp03.log',
-            'quick': '/tmp/oracle-quick-install.log'
+            'quick': '/tmp/oracle-install-all.log'
         }
         
         log_file = log_files.get(log_type)
@@ -1359,28 +1307,61 @@ def api_installation_logs(log_type):
             return jsonify({
                 'success': True,
                 'logs': f'Waiting for {log_type} to start...\n',
-                'size': 0
+                'size': 0,
+                'is_running': True,
+                'current_step': 0
             })
         
         # Get file size
         file_size = os.path.getsize(log_file)
         
-        # Read all lines (tail -f behavior)
-        with open(log_file, 'r') as f:
+        # Read all content
+        with open(log_file, 'r', errors='replace') as f:
             content = f.read()
         
         # Check if process is still running
-        script_file = log_file.replace('.log', '.sh')
         is_running = False
-        if os.path.exists(script_file):
-            proc = subprocess.run(['pgrep', '-f', script_file], capture_output=True)
+        if log_type == 'quick':
+            # For unified install, check for the oradba install process
+            proc = subprocess.run(['pgrep', '-f', 'oradba install'], capture_output=True)
             is_running = proc.returncode == 0
+        else:
+            script_file = log_file.replace('.log', '.sh')
+            if os.path.exists(script_file):
+                proc = subprocess.run(['pgrep', '-f', script_file], capture_output=True)
+                is_running = proc.returncode == 0
+        
+        # Parse step progress from log content (from InstallManager step markers)
+        current_step = 0
+        total_steps = 4
+        step_statuses = {}
+        if content:
+            import re
+            # Detect "Step X/Y" headers from install.py _step_header()
+            step_matches = re.findall(r'Step (\d+)/(\d+)', content)
+            if step_matches:
+                current_step = int(step_matches[-1][0])
+                total_steps = int(step_matches[-1][1])
+            # Detect completed steps from _step_result()
+            completed = re.findall(r'[✓✓] Step (\d+) complete', content)
+            for s in completed:
+                step_statuses[int(s)] = 'complete'
+            # Detect failed steps
+            failed = re.findall(r'[✗✗] Step (\d+) FAILED', content)
+            for s in failed:
+                step_statuses[int(s)] = 'failed'
+            # Detect overall completion
+            if 'Installation Complete' in content:
+                current_step = total_steps
         
         return jsonify({
             'success': True,
             'logs': content,
             'size': file_size,
-            'is_running': is_running
+            'is_running': is_running,
+            'current_step': current_step,
+            'total_steps': total_steps,
+            'step_statuses': step_statuses
         })
     except Exception as e:
         return jsonify({

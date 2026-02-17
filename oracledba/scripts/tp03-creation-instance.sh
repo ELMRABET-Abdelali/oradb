@@ -53,12 +53,12 @@ cd $ORACLE_HOME
 
 echo ""
 echo "✓ Installation Software terminée"
+
 echo ""
-echo "IMPORTANT: Exécuter les scripts root (en tant que root):"
-echo "  sudo /u01/app/oraInventory/orainstRoot.sh"
-echo "  sudo $ORACLE_HOME/root.sh"
-echo ""
-read -p "Appuyez sur ENTRÉE après avoir exécuté les scripts root..."
+echo "[2b/6] Running root configuration scripts..."
+sudo /u01/app/oraInventory/orainstRoot.sh || echo "⚠ orainstRoot.sh returned non-zero (continuing)"
+sudo $ORACLE_HOME/root.sh || echo "⚠ root.sh returned non-zero (continuing)"
+echo "✓ Root scripts executed"
 
 echo ""
 echo "[3/6] Configuration Listener..."
@@ -100,21 +100,21 @@ echo ""
 dbca -silent \
   -createDatabase \
   -templateName General_Purpose.dbc \
-  -gdbname GDCPROD \
+  -gdbName GDCPROD \
   -sid GDCPROD \
   -createAsContainerDatabase true \
   -numberOfPDBs 1 \
   -pdbName GDCPDB \
   -pdbAdminPassword Oracle123 \
-  -sysPassword SysOracle123 \
-  -systemPassword SystemOracle123 \
+  -sysPassword Oracle123 \
+  -systemPassword Oracle123 \
   -datafileDestination '/u01/app/oracle/oradata' \
+  -recoveryAreaDestination '/u01/app/oracle/fast_recovery_area' \
   -storageType FS \
   -characterSet AL32UTF8 \
   -nationalCharacterSet AL16UTF16 \
-  -memoryPercentage 50 \
-  -emConfiguration NONE \
-  -ignorePreReqs
+  -totalMemory 2048 \
+  -emConfiguration NONE
 
 echo ""
 echo "✓ Base de données créée"
@@ -122,8 +122,10 @@ echo "✓ Base de données créée"
 echo ""
 echo "[5/6] Configuration auto-start..."
 
-# Ajouter à /etc/oratab
-echo "GDCPROD:$ORACLE_HOME:Y" | sudo tee -a /etc/oratab
+# Ajouter à /etc/oratab (may need sudo, ignore errors)
+if ! grep -q GDCPROD /etc/oratab 2>/dev/null; then
+    echo "GDCPROD:$ORACLE_HOME:Y" | sudo tee -a /etc/oratab 2>/dev/null || echo "GDCPROD:$ORACLE_HOME:Y" >> /etc/oratab 2>/dev/null || true
+fi
 
 echo ""
 echo "[6/6] Vérification installation..."

@@ -60,10 +60,25 @@ def show_banner():
 # INSTALLATION COMMANDS
 # ============================================================================
 
-@main.group()
-def install():
-    """📦 Install and configure Oracle Database"""
-    pass
+@main.group(invoke_without_command=True)
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompts')
+@click.option('--config', type=click.Path(exists=True), help='Configuration YAML file')
+@click.pass_context
+def install(ctx, yes, config):
+    """📦 Install and configure Oracle Database
+
+    Run without subcommand for complete one-shot installation:
+      oradba install          # full install with live output
+      oradba install --yes    # skip confirmation
+    """
+    ctx.ensure_object(dict)
+    ctx.obj['yes'] = yes
+    ctx.obj['config'] = config
+    if ctx.invoked_subcommand is None:
+        from .modules.install import InstallManager
+        mgr = InstallManager(config)
+        success = mgr.install_all(auto_yes=yes)
+        sys.exit(0 if success else 1)
 
 
 @install.command('all')
@@ -71,23 +86,23 @@ def install():
 @click.option('--skip-system', is_flag=True, help='Skip system setup')
 @click.option('--skip-binaries', is_flag=True, help='Skip binary installation')
 @click.option('--skip-db', is_flag=True, help='Skip database creation')
-@click.option('--verbose', is_flag=True, help='Show detailed progress')
-def install_all(config, skip_system, skip_binaries, skip_db, verbose):
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
+def install_all(config, skip_system, skip_binaries, skip_db, yes):
     """🚀 Complete Oracle 19c installation from scratch"""
     from .modules.install import InstallManager
     mgr = InstallManager(config)
-    success = mgr.install_all(skip_system, skip_binaries, skip_db, verbose)
+    success = mgr.install_all(skip_system, skip_binaries, skip_db, auto_yes=yes)
     sys.exit(0 if success else 1)
 
 
 @install.command('full')
 @click.option('--config', type=click.Path(exists=True), help='Configuration YAML file')
-@click.option('--verbose', is_flag=True, help='Show detailed progress')
-def install_full(config, verbose):
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
+def install_full(config, yes):
     """🚀 ONE-BUTTON Complete Oracle 19c installation"""
     from .modules.install import InstallManager
     mgr = InstallManager(config)
-    success = mgr.install_all(False, False, False, verbose)
+    success = mgr.install_all(auto_yes=yes)
     sys.exit(0 if success else 1)
 
 
@@ -114,10 +129,10 @@ def install_binaries(config):
 @install.command('software')
 @click.option('--config', type=click.Path(exists=True), help='Configuration YAML file')
 def install_software(config):
-    """Install Oracle software - runs runInstaller"""
+    """Install Oracle software - runs runInstaller + root scripts"""
     from .modules.install import InstallManager
     mgr = InstallManager(config)
-    success = mgr._install_oracle_software()
+    success = mgr.install_software()
     sys.exit(0 if success else 1)
 
 
