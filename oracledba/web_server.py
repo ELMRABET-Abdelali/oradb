@@ -1465,7 +1465,12 @@ def api_infra_storage():
         pool_copy['disk'] = _get_pool_disk_usage(pool['path'])
         # Count tablespaces using datafiles in this path
         try:
-            sql = f"COL TABLESPACE_NAME FORMAT A30\nSELECT DISTINCT TABLESPACE_NAME FROM DBA_DATA_FILES WHERE FILE_NAME LIKE '{pool['path']}%' ORDER BY TABLESPACE_NAME;"
+            sql = (
+                "COL TABLESPACE_NAME FORMAT A30\n"
+                "COL FILE_NAME FORMAT A100\n"
+                f"SELECT DISTINCT TABLESPACE_NAME, MIN(FILE_NAME) AS FILE_NAME FROM DBA_DATA_FILES "
+                f"WHERE FILE_NAME LIKE '{pool['path']}%' GROUP BY TABLESPACE_NAME ORDER BY TABLESPACE_NAME;"
+            )
             out = run_sqlplus(sql)
             rows = parse_sql_rows(out)
             pool_copy['tablespaces'] = [r.get('TABLESPACE_NAME', '') for r in rows]
