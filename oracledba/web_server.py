@@ -162,7 +162,7 @@ class SystemDetector:
     
     def _run_sql(self, sql, timeout=30):
         """Run SQL via sqlplus and return raw output (uses stdin pipe to preserve $ in view names)"""
-        full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"
+        full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 1000\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\nSET TRIMSPOOL ON\nSET TRIMOUT ON\n{sql}\nEXIT;\n"
         try:
             uid = os.getuid() if hasattr(os, 'getuid') else -1
             if uid == 0:
@@ -1009,10 +1009,13 @@ def security():
 def api_security_users():
     """API: List database users as structured JSON"""
     try:
-        sql = """SELECT username AS "USERNAME", account_status AS "ACCOUNT_STATUS",
+        sql = """COL "USERNAME" FORMAT A30
+COL "ACCOUNT_STATUS" FORMAT A30
+COL "DEFAULT_TABLESPACE" FORMAT A30
+SELECT username AS "USERNAME", account_status AS "ACCOUNT_STATUS",
        default_tablespace AS "DEFAULT_TABLESPACE", profile AS "PROFILE",
        TO_CHAR(created, 'YYYY-MM-DD') AS "CREATED"
-FROM dba_users WHERE oracle_maintained = 'N' ORDER BY username;"""
+FROM dba_users ORDER BY username FETCH FIRST 50 ROWS ONLY;"""
         result = run_sqlplus(sql)
         rows = parse_sql_rows(result)
         users = []
@@ -1757,7 +1760,7 @@ def run_sqlplus(sql, as_sysdba=True, timeout=60):
     
     connect_str = '/ as sysdba' if as_sysdba else '/'
     
-    full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"
+    full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 1000\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\nSET TRIMSPOOL ON\nSET TRIMOUT ON\n{sql}\nEXIT;\n"
     
     try:
         uid = os.getuid() if hasattr(os, 'getuid') else -1
@@ -1775,14 +1778,27 @@ def run_sqlplus(sql, as_sysdba=True, timeout=60):
 
 
 def parse_sql_rows(output):
-    """Parse pipe-delimited sqlplus output into list of dicts"""
+    """Parse pipe-delimited sqlplus output into list of dicts.
+    Finds header line by looking for the first line with '|' separators.
+    Skips wrapped lines (no '|') and separator lines (all dashes)."""
     rows = []
     lines = [l.strip() for l in output.split('\n') if l.strip()]
-    if len(lines) < 2:
+    # Find header line: first line with '|' that isn't all dashes
+    header_idx = -1
+    for i, line in enumerate(lines):
+        if '|' in line:
+            stripped = line.replace(' ', '').replace('|', '')
+            if stripped and not set(stripped) <= {'-'}:
+                header_idx = i
+                break
+    if header_idx < 0:
         return rows
-    headers = [h.strip() for h in lines[0].split('|')]
-    for line in lines[1:]:
-        if set(line.replace(' ', '').replace('|', '')) <= {'-'}:
+    headers = [h.strip() for h in lines[header_idx].split('|')]
+    for line in lines[header_idx + 1:]:
+        if '|' not in line:
+            continue
+        stripped = line.replace(' ', '').replace('|', '')
+        if not stripped or set(stripped) <= {'-'}:
             continue
         vals = [v.strip() for v in line.split('|')]
         if len(vals) >= len(headers):
@@ -2108,7 +2124,9 @@ def api_storage_controlfile_multiplex():
 @login_required
 def api_storage_controlfile_list():
     """API: List control files as structured JSON"""
-    output = run_sqlplus("SELECT name AS \"NAME\", NVL(status, 'OK') AS \"STATUS\" FROM v$controlfile;")
+    sql = """COL \"NAME\" FORMAT A100
+SELECT name AS \"NAME\", NVL(status, 'OK') AS \"STATUS\" FROM v$controlfile;"""
+    output = run_sqlplus(sql)
     rows = parse_sql_rows(output)
     controlfiles = [{'name': r.get('NAME', ''), 'status': r.get('STATUS', '')} for r in rows]
     return jsonify({'success': True, 'controlfiles': controlfiles})
@@ -2127,7 +2145,8 @@ def api_storage_redolog_multiplex():
 @login_required
 def api_storage_redolog_list():
     """API: List redo log files with group info as structured JSON"""
-    sql = """SELECT f.group# AS "GROUP#", f.member AS "MEMBER", f.type AS "TYPE",
+    sql = """COL "MEMBER" FORMAT A100
+SELECT f.group# AS "GROUP#", f.member AS "MEMBER", f.type AS "TYPE",
        l.status AS "STATUS", ROUND(l.bytes/1024/1024) AS "SIZE_MB", l.members AS "MEMBERS"
 FROM v$logfile f JOIN v$log l ON f.group# = l.group#
 ORDER BY f.group#, f.member;"""
@@ -2171,7 +2190,7 @@ def api_storage_tablespace_drop(name):
 @login_required
 def api_protection_fra_status():
     """API: FRA (Fast Recovery Area) status as structured JSON"""
-    output = run_sqlplus("SELECT name AS \"NAME\", ROUND(space_limit/1024/1024) AS \"SIZE_MB\", ROUND(space_used/1024/1024) AS \"USED_MB\" FROM v$recovery_file_dest;")
+    output = run_sqlplus("COL \"NAME\" FORMAT A80\nSELECT name AS \"NAME\", ROUND(space_limit/1024/1024) AS \"SIZE_MB\", ROUND(space_used/1024/1024) AS \"USED_MB\" FROM v$recovery_file_dest;")
     rows = parse_sql_rows(output)
     if rows:
         try:
