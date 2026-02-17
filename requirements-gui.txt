@@ -1,0 +1,21 @@
+# OracleDBA Web GUI Requirements
+# Install with: pip install -r requirements-gui.txt
+
+# Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# CLI and Terminal UI (already included in main requirements)
+# click>=8.1.0
+# rich>=13.0.0
+
+# Optional: For production deployments
+gunicorn>=21.2.0
+waitress>=2.1.2
+
+# Optional: Session management
+flask-session>=0.5.0
+
+# Optional: WebSocket support for real-time updates
+flask-socketio>=5.3.0
+python-socketio>=5.10.0
