@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h2><i class="fas fa-user-circle"></i> User Profile</h2>
+            <p class="text-muted">Manage your account settings and security</p>
+            <hr>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Profile Information -->
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-info-circle"></i> Account Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <td><strong>Username:</strong></td>
+                            <td>{{ profile.username }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Role:</strong></td>
+                            <td>
+                                <span class="badge badge-{{ 'danger' if profile.role == 'admin' else 'info' }}">
+                                    {{ profile.role|upper }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Created:</strong></td>
+                            <td>{{ profile.created_at[:10] if profile.created_at != 'Unknown' else 'Unknown' }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Last Login:</strong></td>
+                            <td>{{ profile.last_login[:19] if profile.last_login != 'Unknown' else 'Unknown' }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Information -->
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-shield-alt"></i> Security Settings</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <td><strong>Password Security:</strong></td>
+                            <td>
+                                {% if 'PBKDF2' in profile.password_security %}
+                                <span class="badge badge-success">
+                                    <i class="fas fa-lock"></i> Secure (PBKDF2)
+                                </span>
+                                {% else %}
+                                <span class="badge badge-warning">
+                                    <i class="fas fa-exclamation-triangle"></i> Legacy
+                                </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Last Password Change:</strong></td>
+                            <td>
+                                {% if profile.password_changed_at != 'Never' %}
+                                {{ profile.password_changed_at[:10] }}
+                                {% else %}
+                                <span class="text-danger">Never (Change recommended!)</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Encryption:</strong></td>
+                            <td>
+                                <span class="badge badge-dark">SHA-256 + Salt</span>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div class="mt-3">
+                        <a href="{{ url_for('change_password') }}" class="btn btn-primary btn-block">
+                            <i class="fas fa-key"></i> Change Password
+                        </a>
+                    </div>
+
+                    {% if 'Legacy' in profile.password_security %}
+                    <div class="alert alert-warning mt-3 mb-0 small">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>Security Notice:</strong> Your password uses legacy hashing. 
+                        Please change it to upgrade to PBKDF2 encryption.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Recommendations -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-lightbulb"></i> Security Best Practices</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-check-circle text-success"></i> Password Strength</h6>
+                            <ul class="small">
+                                <li>Minimum 8 characters</li>
+                                <li>Mix uppercase and lowercase</li>
+                                <li>Include numbers and symbols</li>
+                                <li>Avoid common words</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-sync-alt text-primary"></i> Regular Updates</h6>
+                            <ul class="small">
+                                <li>Change password every 90 days</li>
+                                <li>Don't reuse old passwords</li>
+                                <li>Use unique passwords</li>
+                                <li>Enable 2FA when available</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-user-shield text-warning"></i> Account Security</h6>
+                            <ul class="small">
+                                <li>Never share credentials</li>
+                                <li>Log out after use</li>
+                                <li>Review activity regularly</li>
+                                <li>Report suspicious activity</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if profile.role == 'admin' %}
+    <!-- Admin Tools -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card shadow-sm border-danger">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="fas fa-user-cog"></i> Administrator Tools</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <a href="/api/installation-status" target="_blank" class="btn btn-outline-primary btn-block">
+                                <i class="fas fa-info-circle"></i><br>
+                                Installation Status
+                            </a>
+                        </div>
+                        <div class="col-md-3">
+                            <a href="/api/oracle-metrics" target="_blank" class="btn btn-outline-success btn-block">
+                                <i class="fas fa-chart-line"></i><br>
+                                Oracle Metrics API
+                            </a>
+                        </div>
+                        <div class="col-md-3">
+                            <a href="/api/system-status" target="_blank" class="btn btn-outline-info btn-block">
+                                <i class="fas fa-server"></i><br>
+                                System Status API
+                            </a>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-warning btn-block" onclick="location.reload()">
+                                <i class="fas fa-sync-alt"></i><br>
+                                Refresh Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

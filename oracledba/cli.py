@@ -137,6 +137,40 @@ def install_database(config, name):
     sys.exit(0 if success else 1)
 
 
+@install.command('gui')
+@click.option('--host', default='0.0.0.0', help='Host to bind (default: 0.0.0.0 for all interfaces)')
+@click.option('--port', default=5000, type=int, help='Port to listen on (default: 5000)')
+@click.option('--debug', is_flag=True, help='Run in debug mode')
+def install_gui(host, port, debug):
+    """🌐 Start Web GUI - Browser-based database management interface"""
+    try:
+        from .web_server import app, config_manager
+        
+        # Update config with provided options
+        gui_config = config_manager.load_config()
+        gui_config['host'] = host
+        gui_config['port'] = port
+        gui_config['debug'] = debug
+        config_manager.save_config(gui_config)
+        
+        console.print("\n[bold green]🌐 Starting OracleDBA Web GUI...[/bold green]\n")
+        console.print(f"[cyan]→ URL:[/cyan] http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+        console.print(f"[cyan]→ Default credentials:[/cyan] admin / admin123")
+        console.print(f"[yellow]⚠️  You will be forced to change password on first login[/yellow]\n")
+        
+        # Start Flask server
+        app.run(host=host, port=port, debug=debug)
+        
+    except ImportError:
+        console.print("[bold red]❌ Web GUI dependencies not installed![/bold red]")
+        console.print("\n[yellow]Install with:[/yellow]")
+        console.print("[cyan]pip install -r requirements-gui.txt[/cyan]\n")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[bold red]❌ Error starting web server:[/bold red] {e}")
+        sys.exit(1)
+
+
 # ============================================================================
 # CONFIGURATION COMMANDS
 # ============================================================================

@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Sample Database - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-flask"></i> Sample Database</h1>
+            <p class="text-muted">Pre-configured test database with 6000+ rows</p>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-bolt"></i> Quick Actions
+                </div>
+                <div class="card-body">
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-success" onclick="createSampleDB()">
+                            <i class="fas fa-plus"></i> Create Sample Database
+                        </button>
+                        <button class="btn btn-primary" onclick="testSampleDB()">
+                            <i class="fas fa-check-circle"></i> Test Database
+                        </button>
+                        <button class="btn btn-info" onclick="showStatus()">
+                            <i class="fas fa-info-circle"></i> Show Status
+                        </button>
+                        <button class="btn btn-warning" onclick="showConnections()">
+                            <i class="fas fa-plug"></i> Connection Info
+                        </button>
+                        <button class="btn btn-danger" onclick="removeSampleDB()">
+                            <i class="fas fa-trash"></i> Remove Database
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output Area -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-terminal"></i> Output
+                </div>
+                <div class="card-body">
+                    <div class="terminal-output" id="sampleOutput">
+Ready to create sample database...
+
+The sample database includes:
+• SAMPLEDB database
+• 3 tables: CUSTOMERS (1000 rows), ORDERS (5000 rows), PRODUCTS (100 rows)
+• All protection features enabled:
+  - ARCHIVELOG mode
+  - Fast Recovery Area (FRA)
+  - Control file multiplexing (3 copies)
+  - Redo log multiplexing (2 members each)
+  - Flashback Database (24 hour retention)
+  - RMAN configured (compression, 7-day retention)
+• Security configured:
+  - secure_profile (password policies)
+  - sample_user (read/write access)
+  - db_admin (DBA privileges)
+
+Click "Create Sample Database" to begin...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features Enabled -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-check-double"></i> Features Included
+                </div>
+                <div class="card-body">
+                    <h6>Data Protection</h6>
+                    <ul>
+                        <li><i class="fas fa-check text-success"></i> ARCHIVELOG mode enabled</li>
+                        <li><i class="fas fa-check text-success"></i> Fast Recovery Area configured</li>
+                        <li><i class="fas fa-check text-success"></i> Control file multiplexing (3 copies)</li>
+                        <li><i class="fas fa-check text-success"></i> Redo log multiplexing (2 members)</li>
+                        <li><i class="fas fa-check text-success"></i> Flashback Database (24 hours)</li>
+                        <li><i class="fas fa-check text-success"></i> RMAN backup configured</li>
+                    </ul>
+                    
+                    <h6>Security</h6>
+                    <ul>
+                        <li><i class="fas fa-check text-success"></i> Password policies (secure_profile)</li>
+                        <li><i class="fas fa-check text-success"></i> Sample users created</li>
+                        <li><i class="fas fa-check text-success"></i> Privileges granted</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-database"></i> Sample Data
+                </div>
+                <div class="card-body">
+                    <h6>Tables</h6>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Table</th>
+                                <th>Rows</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>CUSTOMERS</code></td>
+                                <td>1,000</td>
+                                <td>Customer records</td>
+                            </tr>
+                            <tr>
+                                <td><code>ORDERS</code></td>
+                                <td>5,000</td>
+                                <td>Order transactions</td>
+                            </tr>
+                            <tr>
+                                <td><code>PRODUCTS</code></td>
+                                <td>100</td>
+                                <td>Product catalog</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <h6>Indexes</h6>
+                    <ul>
+                        <li>Primary keys on all tables</li>
+                        <li>Foreign keys (Orders → Customers, Products)</li>
+                        <li>Performance indexes on frequently queried columns</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function appendOutput(text, type = 'info') {
+        const output = document.getElementById('sampleOutput');
+        const timestamp = new Date().toLocaleTimeString();
+        const prefix = `[${timestamp}] `;
+        
+        output.textContent += '\n' + prefix + text;
+        output.scrollTop = output.scrollHeight;
+    }
+    
+    async function createSampleDB() {
+        appendOutput('Creating sample database... This may take 5-10 minutes.');
+        
+        const result = await apiCall('/api/sample/create', 'POST');
+        
+        if (result.success) {
+            appendOutput('✅ Sample database created successfully!');
+            appendOutput(result.output);
+        } else {
+            appendOutput(`❌ Error: ${result.error}`, 'error');
+        }
+    }
+    
+    async function testSampleDB() {
+        appendOutput('Running tests on sample database...');
+        
+        const result = await apiCall('/api/sample/test', 'POST');
+        
+        if (result.success) {
+            appendOutput('✅ Tests completed!');
+            appendOutput(result.output);
+        } else {
+            appendOutput(`❌ Error: ${result.error}`, 'error');
+        }
+    }
+    
+    async function showStatus() {
+        appendOutput('Loading database status...');
+        
+        const result = await apiCall('/api/sample/create', 'POST', { action: 'status' });
+        
+        if (result.success) {
+            appendOutput(result.output);
+        } else {
+            appendOutput(`❌ Error: ${result.error}`, 'error');
+        }
+    }
+    
+    async function showConnections() {
+        appendOutput('Connection Information:');
+        appendOutput('');
+        appendOutput('SQL*Plus:');
+        appendOutput('  sqlplus sample_user/SamplePass123@SAMPLEDB');
+        appendOutput('');
+        appendOutput('JDBC:');
+        appendOutput('  jdbc:oracle:thin:@localhost:1521:SAMPLEDB');
+        appendOutput('');
+        appendOutput('Python (cx_Oracle):');
+        appendOutput('  cx_Oracle.connect("sample_user", "SamplePass123", "localhost:1521/SAMPLEDB")');
+    }
+    
+    async function removeSampleDB() {
+        if (!confirm('Are you sure you want to remove the sample database? This cannot be undone.')) {
+            return;
+        }
+        
+        appendOutput('Removing sample database...');
+        
+        const result = await apiCall('/api/sample/remove', 'POST');
+        
+        if (result.success) {
+            appendOutput('✅ Sample database removed successfully!');
+            appendOutput(result.output);
+        } else {
+            appendOutput(`❌ Error: ${result.error}`, 'error');
+        }
+    }
+</script>
+{% endblock %}

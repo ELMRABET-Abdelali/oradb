@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block title %}Security - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-lock"></i> Security Management</h1>
+            <p class="text-muted">Manage users, privileges, profiles, and audit  configuration</p>
+        </div>
+    </div>
+
+    <!-- Create User -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-user-plus"></i> Create Database User
+                </div>
+                <div class="card-body">
+                    <form id="createUserForm" onsubmit="createUser(event)">
+                        <div class="mb-3">
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" placeholder="APP_USER" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Default Tablespace</label>
+                            <input type="text" class="form-control" id="defaultTs" value="USERS">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Profile</label>
+                            <select class="form-select" id="profile">
+                                <option value="DEFAULT">DEFAULT</option>
+                                <option value="secure_profile">secure_profile</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-plus"></i> Create User
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-users"></i> Existing Users</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="loadUsers()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 350px; overflow-y: auto;">
+                    <div id="usersList">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-spinner fa-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Privileges & Roles -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-key"></i> Grant Privileges
+                </div>
+                <div class="card-body">
+                    <form id="grantForm" onsubmit="grantPrivilege(event)">
+                        <div class="mb-3">
+                            <label class="form-label">User</label>
+                            <input type="text" class="form-control" id="grantUser" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Privilege/Role</label>
+                            <select class="form-select" id="grantPriv">
+                                <option value="CONNECT">CONNECT</option>
+                                <option value="RESOURCE">RESOURCE</option>
+                                <option value="DBA">DBA</option>
+                                <option value="CREATE SESSION">CREATE SESSION</option>
+                                <option value="CREATE TABLE">CREATE TABLE</option>
+                                <option value="CREATE VIEW">CREATE VIEW</option>
+                                <option value="CREATE PROCEDURE">CREATE PROCEDURE</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="fas fa-check"></i> Grant
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-shield-alt"></i> Password Profiles
+                </div>
+                <div class="card-body">
+                    <p><strong>secure_profile (recommended)</strong></p>
+                    <ul style="font-size: 14px;">
+                        <li>Failed login attempts: 3</li>
+                        <li>Password life time: 90 days</li>
+                        <li>Password lock time: 1 day</li>
+                        <li>Password reuse time: 365 days</li>
+                    </ul>
+                    <button class="btn btn-primary w-100" onclick="createSecureProfile()">
+                        <i class="fas fa-plus"></i> Create secure_profile
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Configuration -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-eye"></i> Audit Configuration
+                </div>
+                <div class="card-body">
+                    <form id="auditForm" class="row g-3" onsubmit="configureAudit(event)">
+                        <div class="col-md-4">
+                            <label class="form-label">Audit Action</label>
+                            <select class="form-select" id="auditAction">
+                                <option value="ALL">ALL (All statements)</option>
+                                <option value="DDL">DDL (CREATE, ALTER, DROP)</option>
+                                <option value="DML">DML (INSERT, UPDATE, DELETE)</option>
+                                <option value="SELECT">SELECT</option>
+                                <option value="LOGON">LOGON/LOGOFF</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">On User</label>
+                            <input type="text" class="form-control" id="auditUser" placeholder="Leave empty for all">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="btn-group w-100" role="group">
+                                <button type="submit" name="action" value="enable" class="btn btn-success">
+                                    <i class="fas fa-play"></i> Enable
+                                </button>
+                                <button type="submit" name="action" value="disable" class="btn btn-warning">
+                                    <i class="fas fa-stop"></i> Disable
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                    
+                    <div class="mt-3">
+                        <button class="btn btn-info" onclick="viewAuditRecords()">
+                            <i class="fas fa-list"></i> View Audit Records
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-terminal"></i> Output
+                </div>
+                <div class="card-body">
+                    <div class="terminal-output" id="securityOutput">
+Ready to manage security...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', loadUsers);
+    
+    async function loadUsers() {
+        const listDiv = document.getElementById('usersList');
+        listDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+        
+        const result = await apiCall('/api/security/users');
+        
+        if (result.success) {
+            listDiv.innerHTML = `<pre class="mb-0" style="font-size: 12px;">${result.output}</pre>`;
+        } else {
+            listDiv.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+        }
+    }
+    
+    async function createUser(event) {
+        event.preventDefault();
+        
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const defaultTs = document.getElementById('defaultTs').value;
+        const profile = document.getElementById('profile').value;
+        
+        appendSecurityOutput(`Creating user ${username}...`);
+        
+        const result = await apiCall('/api/security/user/create', 'POST', {
+            username: username,
+            password: password,
+            defaultTs: defaultTs,
+            profile: profile
+        });
+        
+        if (result.success) {
+            appendSecurityOutput('✅ User created successfully!');
+            appendSecurityOutput(result.output);
+            loadUsers();
+            document.getElementById('createUserForm').reset();
+        } else {
+            appendSecurityOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function grantPrivilege(event) {
+        event.preventDefault();
+        
+        const user = document.getElementById('grantUser').value;
+        const priv = document.getElementById('grantPriv').value;
+        
+        appendSecurityOutput(`Granting ${priv} to ${user}...`);
+        
+        const result = await apiCall('/api/security/grant', 'POST', {
+            user: user,
+            privilege: priv
+        });
+        
+        if (result.success) {
+            appendSecurityOutput(`✅ ${priv} granted to ${user}!`);
+            appendSecurityOutput(result.output);
+        } else {
+            appendSecurityOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function createSecureProfile() {
+        appendSecurityOutput('Creating secure_profile...');
+        
+        const result = await apiCall('/api/security/profile/create', 'POST', {
+            name: 'secure_profile'
+        });
+        
+        if (result.success) {
+            appendSecurityOutput('✅ secure_profile created!');
+            appendSecurityOutput(result.output);
+        } else {
+            appendSecurityOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function configureAudit(event) {
+        event.preventDefault();
+        
+        const action = document.getElementById('auditAction').value;
+        const user = document.getElementById('auditUser').value;
+        const enable = event.submitter.value === 'enable';
+        
+        appendSecurityOutput(`${enable ? 'Enabling' : 'Disabling'} audit for ${action}...`);
+        
+        const result = await apiCall('/api/security/audit/configure', 'POST', {
+            action: action,
+            user: user || null,
+            enable: enable
+        });
+        
+        if (result.success) {
+            appendSecurityOutput(`✅ Audit ${enable ? 'enabled' : 'disabled'}!`);
+            appendSecurityOutput(result.output);
+        } else {
+            appendSecurityOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function viewAuditRecords() {
+        appendSecurityOutput('Loading audit records...');
+        
+        const result = await apiCall('/api/security/audit/view');
+        
+        if (result.success) {
+            appendSecurityOutput(result.output);
+        } else {
+            appendSecurityOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    function appendSecurityOutput(text) {
+        const output = document.getElementById('securityOutput');
+        const timestamp = new Date().toLocaleTimeString();
+        output.textContent += `\n[${timestamp}] ${text}`;
+        output.scrollTop = output.scrollHeight;
+    }
+</script>
+{% endblock %}

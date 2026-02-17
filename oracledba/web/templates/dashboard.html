@@ -1,0 +1,590 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-tachometer-alt"></i> Dashboard</h1>
+            <p class="text-muted">System Overview and Health Status</p>
+        </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="row">
+        <!-- Oracle Installation -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-box text-primary"></i> Oracle Installation
+                    </h5>
+                    <h3 id="oracle-status">
+                        {% if status.checks.oracle_installed %}
+                            <span class="status-badge status-running">Installed</span>
+                        {% else %}
+                            <span class="status-badge status-stopped">Not Found</span>
+                        {% endif %}
+                    </h3>
+                    <small class="text-muted" id="oracle-home">{{ status.oracle_home }}</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Database Status -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-database text-success"></i> Database
+                    </h5>
+                    <h3 id="database-status">
+                        {% if status.checks.database_running %}
+                            <span class="status-badge status-running">Running</span>
+                        {% else %}
+                            <span class="status-badge status-stopped">Stopped</span>
+                        {% endif %}
+                    </h3>
+                    <small class="text-muted">PMON Process</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Listener Status -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-network-wired text-info"></i> Listener
+                    </h5>
+                    <h3 id="listener-status">
+                        {% if status.checks.listener_running %}
+                            <span class="status-badge status-running">Running</span>
+                        {% else %}
+                            <span class="status-badge status-stopped">Stopped</span>
+                        {% endif %}
+                    </h3>
+                    <small class="text-muted">TNSLSNR Process</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Cluster Status -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-server text-warning"></i> Cluster
+                    </h5>
+                    <h3 id="cluster-status">
+                        {% if status.checks.cluster_configured %}
+                            <span class="status-badge status-running">Configured</span>
+                        {% else %}
+                            <span class="status-badge status-unknown">Not Configured</span>
+                        {% endif %}
+                    </h3>
+                    <small class="text-muted">RAC / NFS</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Elite Admin Metrics: Background Processes -->
+    {% if status.checks.database_running %}
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <i class="fas fa-cogs"></i> Background Processes (Elite Controller)
+                </div>
+                <div class="card-body">
+                    <div class="row text-center" id="processes-row">
+                        <div class="col-md-2">
+                            <div class="process-indicator">
+                                <i class="fas fa-memory text-danger" style="font-size: 2em;"></i>
+                                <h6>PMON</h6>
+                                <span class="badge badge-success" id="pmon-count">{{ status.database.processes.pmon }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="process-indicator">
+                                <i class="fas fa-microchip text-warning" style="font-size: 2em;"></i>
+                                <h6>SMON</h6>
+                                <span class="badge badge-success" id="smon-count">{{ status.database.processes.smon }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="process-indicator">
+                                <i class="fas fa-save text-primary" style="font-size: 2em;"></i>
+                                <h6>DBWR</h6>
+                                <span class="badge badge-success" id="dbwr-count">{{ status.database.processes.dbwr }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="process-indicator">
+                                <i class="fas fa-file-alt text-info" style="font-size: 2em;"></i>
+                                <h6>LGWR</h6>
+                                <span class="badge badge-success" id="lgwr-count">{{ status.database.processes.lgwr }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="process-indicator">
+                                <i class="fas fa-check-circle text-success" style="font-size: 2em;"></i>
+                                <h6>CKPT</h6>
+                                <span class="badge badge-success" id="ckpt-count">{{ status.database.processes.ckpt }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-1">
+                            <div class="process-indicator">
+                                <i class="fas fa-archive text-secondary" style="font-size: 2em;"></i>
+                                <h6>ARCH</h6>
+                                <span class="badge badge-success" id="arch-count">{{ status.database.processes.arch }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-1">
+                            <div class="process-indicator">
+                                <i class="fas fa-medkit text-danger" style="font-size: 2em;"></i>
+                                <h6>RECO</h6>
+                                <span class="badge badge-success" id="reco-count">{{ status.database.processes.reco }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Elite Admin Metrics: Memory (SGA & PGA) -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card border-success">
+                <div class="card-header bg-success text-white">
+                    <i class="fas fa-memory"></i> SGA (System Global Area)
+                </div>
+                <div class="card-body" id="sga-metrics">
+                    {% if status.metrics and status.metrics.sga %}
+                    <table class="table table-sm">
+                        {% for component, size in status.metrics.sga.items() %}
+                        <tr>
+                            <td><strong>{{ component }}</strong></td>
+                            <td class="text-right">{{ "%.2f"|format(size) }} MB</td>
+                        </tr>
+                        {% endfor %}
+                        <tr class="table-primary">
+                            <td><strong>Total SGA</strong></td>
+                            <td class="text-right"><strong>{{ "%.2f"|format(status.metrics.memory.total_sga_mb) }} MB</strong></td>
+                        </tr>
+                    </table>
+                    {% else %}
+                    <p class="text-muted">No SGA metrics available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <i class="fas fa-database"></i> PGA (Program Global Area)
+                </div>
+                <div class="card-body" id="pga-metrics">
+                    {% if status.metrics and status.metrics.pga %}
+                    <table class="table table-sm">
+                        {% for component, size in status.metrics.pga.items() %}
+                        <tr>
+                            <td><strong>{{ component }}</strong></td>
+                            <td class="text-right">{{ "%.2f"|format(size) }} MB</td>
+                        </tr>
+                        {% endfor %}
+                        <tr class="table-info">
+                            <td><strong>Total PGA</strong></td>
+                            <td class="text-right"><strong>{{ "%.2f"|format(status.metrics.memory.total_pga_mb) }} MB</strong></td>
+                        </tr>
+                    </table>
+                    {% else %}
+                    <p class="text-muted">No PGA metrics available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Elite Admin Metrics: Sessions & Processes -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <i class="fas fa-users"></i> Active Sessions & Processes
+                </div>
+                <div class="card-body" id="session-metrics">
+                    {% if status.metrics and status.metrics.processes %}
+                    <div class="row text-center">
+                        <div class="col-6">
+                            <h1 class="text-primary" id="process-count">{{ status.metrics.processes.count }}</h1>
+                            <p class="text-muted">Processes</p>
+                        </div>
+                        <div class="col-6">
+                            <h1 class="text-success" id="session-count">{{ status.metrics.sessions.count }}</h1>
+                            <p class="text-muted">Sessions</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No session metrics available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-secondary">
+                <div class="card-header bg-secondary text-white">
+                    <i class="fas fa-file"></i> Database Files
+                </div>
+                <div class="card-body" id="file-metrics">
+                    {% if status.metrics and status.metrics.datafiles is defined %}
+                    <div class="row text-center">
+                        <div class="col-6">
+                            <h1 class="text-info" id="datafile-count">{{ status.metrics.datafiles }}</h1>
+                            <p class="text-muted">Datafiles</p>
+                        </div>
+                        <div class="col-6">
+                            <h1 class="text-warning" id="tempfile-count">{{ status.metrics.tempfiles }}</h1>
+                            <p class="text-muted">Tempfiles</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No file metrics available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Elite Admin Metrics: Tablespaces -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card border-danger">
+                <div class="card-header bg-danger text-white">
+                    <i class="fas fa-hdd"></i> Tablespace Usage (Critical Monitoring)
+                </div>
+                <div class="card-body" id="tablespace-metrics">
+                    {% if status.metrics and status.metrics.tablespaces %}
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Tablespace</th>
+                                <th class="text-right">Total (MB)</th>
+                                <th class="text-right">Used (MB)</th>
+                                <th class="text-right">Free (MB)</th>
+                                <th width="40%">Usage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for ts in status.metrics.tablespaces %}
+                        <tr>
+                            <td><strong>{{ ts.name }}</strong></td>
+                            <td class="text-right">{{ "%.2f"|format(ts.total_mb) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(ts.used_mb) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(ts.free_mb) }}</td>
+                            <td>
+                                <div class="progress">
+                                    {% set pct = ts.pct_used %}
+                                    {% if pct >= 90 %}
+                                        {% set bar_color = 'bg-danger' %}
+                                    {% elif pct >= 80 %}
+                                        {% set bar_color = 'bg-warning' %}
+                                    {% else %}
+                                        {% set bar_color = 'bg-success' %}
+                                    {% endif %}
+                                    <div class="progress-bar {{ bar_color }}" role="progressbar" 
+                                         style="width: {{ pct }}%" 
+                                         aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
+                                        {{ "%.1f"|format(pct) }}%
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="text-muted">No tablespace metrics available. Ensure database is running and accessible.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- System Information -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-info-circle"></i> System Information
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr>
+                                <th width="40%">Hostname</th>
+                                <td>{{ status.hostname }}</td>
+                            </tr>
+                            <tr>
+                                <th>Oracle Version</th>
+                                <td><code>{{ status.oracle.version if status.oracle and status.oracle.version else 'Not Found' }}</code></td>
+                            </tr>
+                            <tr>
+                                <th>Oracle Home</th>
+                                <td><code>{{ status.oracle_home }}</code></td>
+                            </tr>
+                            {% if status.database and status.database.instances %}
+                            <tr>
+                                <th>Running Instances</th>
+                                <td>
+                                    {% for instance in status.database.instances %}
+                                    <span class="badge badge-success">{{ instance }}</span>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                            {% endif %}
+                            <tr>
+                                <th>Last Update</th>
+                                <td id="last-update">{{ status.timestamp }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <button class="btn btn-primary btn-sm" onclick="refreshStatus()">
+                        <i class="fas fa-sync-alt"></i> Refresh Status
+                    </button>
+                    <button class="btn btn-success btn-sm" onclick="refreshMetrics()">
+                        <i class="fas fa-chart-line"></i> Refresh Metrics
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Quick Actions -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-bolt"></i> Quick Actions
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('sample') }}" class="btn btn-success">
+                            <i class="fas fa-flask"></i> Create Sample Database
+                        </a>
+                        <a href="{{ url_for('databases') }}" class="btn btn-primary">
+                            <i class="fas fa-database"></i> Manage Databases
+                        </a>
+                        <a href="{{ url_for('protection') }}" class="btn btn-warning">
+                            <i class="fas fa-shield-alt"></i> Configure Protection
+                        </a>
+                        <a href="{{ url_for('terminal') }}" class="btn btn-dark">
+                            <i class="fas fa-terminal"></i> Open Terminal
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-history"></i> Features Overview
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-shield-alt"></i> Data Protection</h6>
+                            <ul class="list-unstyled">
+                                <li>✓ ARCHIVELOG Mode</li>
+                                <li>✓ Fast Recovery Area</li>
+                                <li>✓ RMAN Backup</li>
+                                <li>✓ Flashback Database</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-lock"></i> Security</h6>
+                            <ul class="list-unstyled">
+                                <li>✓ User Management</li>
+                                <li>✓ Privilege Control</li>
+                                <li>✓ Password Policies</li>
+                                <li>✓ Audit Configuration</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-server"></i> High Availability</h6>
+                            <ul class="list-unstyled">
+                                <li>✓ Data Guard</li>
+                                <li>✓ Listener Config</li>
+                                <li>✓ RAC Cluster</li>
+                                <li>✓ ASM Storage</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Auto-refresh status every 30 seconds
+    setInterval(refreshStatus, 30000);
+    
+    // Auto-refresh metrics every 10 seconds
+    setInterval(refreshMetrics, 10000);
+    
+    async function refreshStatus() {
+        const result = await apiCall('/api/system-status');
+        
+        if (result.checks) {
+            // Update Oracle Status
+            updateStatus('oracle-status', result.checks.oracle_installed, 'Installed', 'Not Found');
+            
+            // Update Database Status
+            updateStatus('database-status', result.checks.database_running, 'Running', 'Stopped');
+            
+            // Update Listener Status
+            updateStatus('listener-status', result.checks.listener_running, 'Running', 'Stopped');
+            
+            // Update Cluster Status
+            updateStatus('cluster-status', result.checks.cluster_configured, 'Configured', 'Not Configured');
+            
+            // Update timestamp
+            document.getElementById('last-update').textContent = formatTimestamp(result.timestamp);
+            
+            // Also refresh metrics if database is running
+            if (result.checks.database_running) {
+                refreshMetrics();
+            }
+        }
+    }
+    
+    async function refreshMetrics() {
+        const metrics = await apiCall('/api/oracle-metrics');
+        
+        if (!metrics || metrics.error) {
+            console.log('No metrics available');
+            return;
+        }
+        
+        // Update process counts
+        if (metrics.processes) {
+            updateElement('process-count', metrics.processes.count);
+        }
+        
+        if (metrics.sessions) {
+            updateElement('session-count', metrics.sessions.count);
+        }
+        
+        // Update file counts
+        if (metrics.datafiles !== undefined) {
+            updateElement('datafile-count', metrics.datafiles);
+        }
+        
+        if (metrics.tempfiles !== undefined) {
+            updateElement('tempfile-count', metrics.tempfiles);
+        }
+        
+        // Update SGA metrics
+        if (metrics.sga) {
+            let sgaHtml = '<table class="table table-sm">';
+            let totalSga = 0;
+            
+            for (const [component, size] of Object.entries(metrics.sga)) {
+                sgaHtml += `<tr><td><strong>${component}</strong></td><td class="text-right">${size.toFixed(2)} MB</td></tr>`;
+                totalSga += size;
+            }
+            
+            sgaHtml += `<tr class="table-primary"><td><strong>Total SGA</strong></td><td class="text-right"><strong>${totalSga.toFixed(2)} MB</strong></td></tr>`;
+            sgaHtml += '</table>';
+            
+            const sgaEl = document.getElementById('sga-metrics');
+            if (sgaEl) sgaEl.innerHTML = sgaHtml;
+        }
+        
+        // Update PGA metrics
+        if (metrics.pga) {
+            let pgaHtml = '<table class="table table-sm">';
+            let totalPga = 0;
+            
+            for (const [component, size] of Object.entries(metrics.pga)) {
+                pgaHtml += `<tr><td><strong>${component}</strong></td><td class="text-right">${size.toFixed(2)} MB</td></tr>`;
+                totalPga += size;
+            }
+            
+            pgaHtml += `<tr class="table-info"><td><strong>Total PGA</strong></td><td class="text-right"><strong>${totalPga.toFixed(2)} MB</strong></td></tr>`;
+            pgaHtml += '</table>';
+            
+            const pgaEl = document.getElementById('pga-metrics');
+            if (pgaEl) pgaEl.innerHTML = pgaHtml;
+        }
+        
+        // Update tablespace metrics
+        if (metrics.tablespaces && metrics.tablespaces.length > 0) {
+            let tsHtml = `<table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Tablespace</th>
+                        <th class="text-right">Total (MB)</th>
+                        <th class="text-right">Used (MB)</th>
+                        <th class="text-right">Free (MB)</th>
+                        <th width="40%">Usage</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+            
+            for (const ts of metrics.tablespaces) {
+                const pct = ts.pct_used;
+                let barColor = 'bg-success';
+                
+                if (pct >= 90) barColor = 'bg-danger';
+                else if (pct >= 80) barColor = 'bg-warning';
+                
+                tsHtml += `<tr>
+                    <td><strong>${ts.name}</strong></td>
+                    <td class="text-right">${ts.total_mb.toFixed(2)}</td>
+                    <td class="text-right">${ts.used_mb.toFixed(2)}</td>
+                    <td class="text-right">${ts.free_mb.toFixed(2)}</td>
+                    <td>
+                        <div class="progress">
+                            <div class="progress-bar ${barColor}" role="progressbar" 
+                                 style="width: ${pct}%" 
+                                 aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+                                ${pct.toFixed(1)}%
+                            </div>
+                        </div>
+                    </td>
+                </tr>`;
+            }
+            
+            tsHtml += '</tbody></table>';
+            
+            const tsEl = document.getElementById('tablespace-metrics');
+            if (tsEl) tsEl.innerHTML = tsHtml;
+        }
+    }
+    
+    function updateElement(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+    
+    function updateStatus(elementId, condition, trueText, falseText) {
+        const element = document.getElementById(elementId);
+        const statusClass = condition ? 'status-running' : 'status-stopped';
+        const text = condition ? trueText : falseText;
+        element.innerHTML = `<span class="status-badge ${statusClass}">${text}</span>`;
+    }
+</script>
+{% endblock %}

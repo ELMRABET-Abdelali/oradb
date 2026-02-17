@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+
+{% block title %}Cluster - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-server"></i> Cluster Management</h1>
+            <p class="text-muted">Manage RAC clusters, NFS, and multi-node configurations</p>
+        </div>
+    </div>
+
+    <!-- Add Node -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-plus"></i> Add Cluster Node
+                </div>
+                <div class="card-body">
+                    <form id="addNodeForm" onsubmit="addNode(event)">
+                        <div class="mb-3">
+                            <label class="form-label">Node Name</label>
+                            <input type="text" class="form-control" id="nodeName" placeholder="rac2" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">IP Address</label>
+                            <input type="text" class="form-control" id="nodeIp" placeholder="192.168.1.102" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Node Role</label>
+                            <select class="form-select" id="nodeRole">
+                                <option value="database">Database Node</option>
+                                <option value="storage">Storage Node (NFS)</option>
+                                <option value="grid">Grid Infrastructure</option>
+                            </select>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="setupSSH" checked>
+                            <label class="form-check-label" for="setupSSH">
+                                Setup SSH equivalence automatically
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-plus"></i> Add Node
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-list"></i> Cluster Nodes</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="loadNodes()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 350px; overflow-y: auto;">
+                    <div id="nodesList">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-spinner fa-spin"></i> Loading...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NFS Configuration -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-folder-open"></i> NFS Storage Configuration
+                </div>
+                <div class="card-body">
+                    <form id="nfsForm" class="row g-3" onsubmit="configureNFS(event)">
+                        <div class="col-md-4">
+                            <label class="form-label">NFS Server IP</label>
+                            <input type="text" class="form-control" id="nfsServer" placeholder="192.168.1.100" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Export Path</label>
+                            <input type="text" class="form-control" id="nfsExport" value="/nfs/shared" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Mount Point</label>
+                            <input type="text" class="form-control" id="nfsMount" value="/mnt/nfs" required>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-cog"></i> Configure NFS
+                            </button>
+                            <button type="button" class="btn btn-info" onclick="testNFS()">
+                                <i class="fas fa-check-circle"></i> Test NFS Connection
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cluster Operations -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-network-wired"></i> Grid Infrastructure
+                </div>
+                <div class="card-body">
+                    <p>Oracle Grid Infrastructure for RAC</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" onclick="installGrid()">
+                            <i class="fas fa-download"></i> Install Grid
+                        </button>
+                        <button class="btn btn-info" onclick="checkGridStatus()">
+                            <i class="fas fa-info-circle"></i> Check Status
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-database"></i> ASM Configuration
+                </div>
+                <div class="card-body">
+                    <p>Automatic Storage Management</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" onclick="configureASM()">
+                            <i class="fas fa-cog"></i> Configure ASM
+                        </button>
+                        <button class="btn btn-info" onclick="checkASMStatus()">
+                            <i class="fas fa-hdd"></i> Check Disks
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-sync-alt"></i> Cluster Services
+                </div>
+                <div class="card-body">
+                    <p>Start/Stop cluster services</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-success" onclick="startCluster()">
+                            <i class="fas fa-play"></i> Start All
+                        </button>
+                        <button class="btn btn-warning" onclick="stopCluster()">
+                            <i class="fas fa-stop"></i> Stop All
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SSH Equivalence -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-key"></i> SSH Equivalence Setup
+                </div>
+                <div class="card-body">
+                    <p>Configure passwordless SSH between cluster nodes for Grid and Oracle users</p>
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="setupSSH('grid')">
+                                <i class="fas fa-user"></i> Setup for grid
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="setupSSH('oracle')">
+                                <i class="fas fa-user"></i> Setup for oracle
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-info w-100" onclick="testSSH()">
+                                <i class="fas fa-check-circle"></i> Test SSH
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-success w-100" onclick="distributeKeys()">
+                                <i class="fas fa-share-alt"></i> Distribute Keys
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-terminal"></i> Output
+                </div>
+                <div class="card-body">
+                    <div class="terminal-output" id="clusterOutput">
+Ready to manage cluster...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', loadNodes);
+    
+    async function loadNodes() {
+        const listDiv = document.getElementById('nodesList');
+        listDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+        
+        const result = await apiCall('/api/cluster/nodes');
+        
+        if (result.success) {
+            if (result.output.includes('No nodes') || result.output.trim() === '') {
+                listDiv.innerHTML = '<div class="alert alert-info">No cluster nodes configured yet.</div>';
+            } else {
+                listDiv.innerHTML = `<pre class="mb-0" style="font-size: 12px;">${result.output}</pre>`;
+            }
+        } else {
+            listDiv.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+        }
+    }
+    
+    async function addNode(event) {
+        event.preventDefault();
+        
+        const name = document.getElementById('nodeName').value;
+        const ip = document.getElementById('nodeIp').value;
+        const role = document.getElementById('nodeRole').value;
+        const setupSSH = document.getElementById('setupSSH').checked;
+        
+        appendClusterOutput(`Adding node ${name} (${ip}) with role ${role}...`);
+        
+        const result = await apiCall('/api/cluster/add-node', 'POST', {
+            name: name,
+            ip: ip,
+            role: role,
+            setupSSH: setupSSH
+        });
+        
+        if (result.success) {
+            appendClusterOutput(`✅ Node ${name} added successfully!`);
+            appendClusterOutput(result.output);
+            loadNodes();
+            document.getElementById('addNodeForm').reset();
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function configureNFS(event) {
+        event.preventDefault();
+        
+        const server = document.getElementById('nfsServer').value;
+        const exportPath = document.getElementById('nfsExport').value;
+        const mountPoint = document.getElementById('nfsMount').value;
+        
+        appendClusterOutput(`Configuring NFS: ${server}:${exportPath} -> ${mountPoint}...`);
+        
+        const result = await apiCall('/api/cluster/nfs/configure', 'POST', {
+            server: server,
+            export: exportPath,
+            mount: mountPoint
+        });
+        
+        if (result.success) {
+            appendClusterOutput('✅ NFS configured successfully!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function testNFS() {
+        appendClusterOutput('Testing NFS connection...');
+        
+        const result = await apiCall('/api/cluster/nfs/test');
+        
+        if (result.success) {
+            appendClusterOutput('✅ NFS connection OK!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ NFS test failed: ${result.error}`);
+        }
+    }
+    
+    async function installGrid() {
+        appendClusterOutput('Installing Grid Infrastructure... This may take 30-60 minutes.');
+        
+        const result = await apiCall('/api/cluster/grid/install', 'POST');
+        
+        if (result.success) {
+            appendClusterOutput('✅ Grid Infrastructure installed!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function checkGridStatus() {
+        appendClusterOutput('Checking Grid Infrastructure status...');
+        
+        const result = await apiCall('/api/cluster/grid/status');
+        
+        if (result.success) {
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function configureASM() {
+        appendClusterOutput('Configuring ASM...');
+        
+        const result = await apiCall('/api/cluster/asm/configure', 'POST');
+        
+        if (result.success) {
+            appendClusterOutput('✅ ASM configured!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function checkASMStatus() {
+        appendClusterOutput('Checking ASM disk groups...');
+        
+        const result = await apiCall('/api/cluster/asm/status');
+        
+        if (result.success) {
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function startCluster() {
+        appendClusterOutput('Starting cluster services...');
+        
+        const result = await apiCall('/api/cluster/start', 'POST');
+        
+        if (result.success) {
+            appendClusterOutput('✅ Cluster started!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function stopCluster() {
+        if (!confirm('Stop all cluster services?')) return;
+        
+        appendClusterOutput('Stopping cluster services...');
+        
+        const result = await apiCall('/api/cluster/stop', 'POST');
+        
+        if (result.success) {
+            appendClusterOutput('✅ Cluster stopped!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function setupSSH(user) {
+        appendClusterOutput(`Setting up SSH equivalence for ${user}...`);
+        
+        const result = await apiCall('/api/cluster/ssh/setup', 'POST', { user: user });
+        
+        if (result.success) {
+            appendClusterOutput(`✅ SSH equivalence configured for ${user}!`);
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function testSSH() {
+        appendClusterOutput('Testing SSH connectivity...');
+        
+        const result = await apiCall('/api/cluster/ssh/test');
+        
+        if (result.success) {
+            appendClusterOutput('✅ SSH connectivity OK!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ SSH test failed: ${result.error}`);
+        }
+    }
+    
+    async function distributeKeys() {
+        appendClusterOutput('Distributing SSH keys to all nodes...');
+        
+        const result = await apiCall('/api/cluster/ssh/distribute', 'POST');
+        
+        if (result.success) {
+            appendClusterOutput('✅ SSH keys distributed!');
+            appendClusterOutput(result.output);
+        } else {
+            appendClusterOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    function appendClusterOutput(text) {
+        const output = document.getElementById('clusterOutput');
+        const timestamp = new Date().toLocaleTimeString();
+        output.textContent += `\n[${timestamp}] ${text}`;
+        output.scrollTop = output.scrollHeight;
+    }
+</script>
+{% endblock %}

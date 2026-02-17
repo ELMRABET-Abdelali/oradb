@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}Terminal - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-terminal"></i> Interactive Terminal</h1>
+            <p class="text-muted">Execute OracleDBA CLI commands</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-terminal"></i> Command Terminal</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearTerminal()">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                </div>
+                <div class="card-body">
+                    <!-- Command Input -->
+                    <div class="input-group mb-3">
+                        <span class="input-group-text">$</span>
+                        <input type="text" class="form-control" id="commandInput" 
+                               placeholder="Enter oradba command..." onkeypress="handleKeyPress(event)">
+                        <button class="btn btn-primary" onclick="executeCommand()">
+                            <i class="fas fa-play"></i> Execute
+                        </button>
+                    </div>
+                    
+                    <!-- Terminal Output -->
+                    <div class="terminal-output" id="terminalOutput">
+Welcome to OracleDBA Interactive Terminal
+Type 'oradba --help' to see available commands
+
+Available command groups:
+  - oradba sample        : Sample database operations
+  - oradba database      : Database management
+  - oradba storage       : Storage and tablespace management
+  - oradba protection    : Data protection (ARCHIVELOG, FRA, RMAN)
+  - oradba security      : User and security management
+  - oradba cluster       : Cluster and RAC management
+  - oradba help          : Comprehensive help system
+
+Examples:
+  $ oradba sample create
+  $ oradba help features
+  $ oradba protection archivelog status
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Command History -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-history"></i> Command History
+                </div>
+                <div class="card-body">
+                    <ul class="list-group" id="commandHistory">
+                        <li class="list-group-item text-muted">No commands executed yet</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Commands -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-bolt"></i> Quick Commands
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Sample Database</h6>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('oradba sample create')">
+                                    Create Sample Database
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('oradba sample status')">
+                                    Show Sample Status
+                                </button>
+                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('oradba sample test')">
+                                    Test Sample Database
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Help & Information</h6>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('oradba help features')">
+                                    List All Features
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('oradba help workflow')">
+                                    Show Workflow Guide
+                                </button>
+                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('oradba help quick')">
+                                    Quick Reference
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let commandHistory = [];
+    let historyIndex = -1;
+    
+    // Handle Enter key
+    function handleKeyPress(event) {
+        if (event.key === 'Enter') {
+            executeCommand();
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            navigateHistory('up');
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            navigateHistory('down');
+        }
+    }
+    
+    // Navigate command history
+    function navigateHistory(direction) {
+        if (commandHistory.length === 0) return;
+        
+        if (direction === 'up') {
+            if (historyIndex < commandHistory.length - 1) {
+                historyIndex++;
+                document.getElementById('commandInput').value = commandHistory[historyIndex];
+            }
+        } else {
+            if (historyIndex > 0) {
+                historyIndex--;
+                document.getElementById('commandInput').value = commandHistory[historyIndex];
+            } else {
+                historyIndex = -1;
+                document.getElementById('commandInput').value = '';
+            }
+        }
+    }
+    
+    // Execute command
+    async function executeCommand() {
+        const input = document.getElementById('commandInput');
+        const command = input.value.trim();
+        
+        if (!command) return;
+        
+        // Add to history
+        commandHistory.unshift(command);
+        historyIndex = -1;
+        updateHistoryDisplay();
+        
+        // Display command in output
+        appendToTerminal(`\n$ ${command}\n`, 'command');
+        
+        // Execute via API
+        const result = await apiCall('/api/terminal/execute', 'POST', { command: command });
+        
+        if (result.success) {
+            appendToTerminal(result.output, 'output');
+        } else {
+            appendToTerminal(`Error: ${result.error}`, 'error');
+        }
+        
+        // Clear input
+        input.value = '';
+    }
+    
+    // Quick command
+    function quickCommand(command) {
+        document.getElementById('commandInput').value = command;
+        executeCommand();
+    }
+    
+    // Append to terminal
+    function appendToTerminal(text, type = 'output') {
+        const terminal = document.getElementById('terminalOutput');
+        const span = document.createElement('span');
+        
+        if (type === 'command') {
+            span.style.color = '#39FF14';
+            span.style.fontWeight = 'bold';
+        } else if (type === 'error') {
+            span.style.color = '#FF4444';
+        } else {
+            span.style.color = '#CCCCCC';
+        }
+        
+        span.textContent = text;
+        terminal.appendChild(span);
+        
+        // Scroll to bottom
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+    
+    // Clear terminal
+    function clearTerminal() {
+        document.getElementById('terminalOutput').textContent = 
+            'Terminal cleared. Type oradba --help for available commands.\n';
+    }
+    
+    // Update history display
+    function updateHistoryDisplay() {
+        const historyList = document.getElementById('commandHistory');
+        historyList.innerHTML = '';
+        
+        if (commandHistory.length === 0) {
+            historyList.innerHTML = '<li class="list-group-item text-muted">No commands executed yet</li>';
+            return;
+        }
+        
+        commandHistory.slice(0, 10).forEach(cmd => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                <code>${cmd}</code>
+                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('${cmd}')">
+                    <i class="fas fa-redo"></i> Rerun
+                </button>
+            `;
+            historyList.appendChild(li);
+        });
+    }
+</script>
+{% endblock %}

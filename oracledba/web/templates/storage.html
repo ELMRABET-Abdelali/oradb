@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Storage - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-hdd"></i> Storage Management</h1>
+            <p class="text-muted">Manage tablespaces, control files, and redo logs</p>
+        </div>
+    </div>
+
+    <!-- Tablespace Management -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-plus"></i> Create Tablespace
+                </div>
+                <div class="card-body">
+                    <form id="createTsForm" onsubmit="createTablespace(event)">
+                        <div class="mb-3">
+                            <label class="form-label">Tablespace Name</label>
+                            <input type="text" class="form-control" id="tsName" placeholder="USERS_DATA" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Size</label>
+                            <input type="text" class="form-control" id="tsSize" value="500M" required>
+                            <small class="text-muted">Examples: 100M, 1G, 5G</small>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="tsAutoextend" checked>
+                            <label class="form-check-label" for="tsAutoextend">
+                                Enable autoextend
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-plus"></i> Create Tablespace
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-list"></i> Tablespace List
+                </div>
+                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                    <div id="tablespaceList">
+                        <div class="text-center text-muted">
+                            <i class="fas fa-spinner fa-spin"></i> Loading...
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary mt-3 w-100" onclick="loadTablespaces()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Control Files & Redo Logs -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-copy"></i> Control File Multiplexing
+                </div>
+                <div class="card-body">
+                    <p>Protect against control file corruption by maintaining multiple copies</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" onclick="multiplexControlFile()">
+                            <i class="fas fa-plus"></i> Add Control File Copy
+                        </button>
+                        <button class="btn btn-outline-info" onclick="listControlFiles()">
+                            <i class="fas fa-list"></i> List Control Files
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-redo"></i> Redo Log Multiplexing
+                </div>
+                <div class="card-body">
+                    <p>Protect against redo log loss by maintaining multiple members</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" onclick="multiplexRedoLog()">
+                            <i class="fas fa-plus"></i> Add Redo Log Member
+                        </button>
+                        <button class="btn btn-outline-info" onclick="listRedoLogs()">
+                            <i class="fas fa-list"></i> List Redo Logs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-terminal"></i> Output
+                </div>
+                <div class="card-body">
+                    <div class="terminal-output" id="storageOutput">
+Ready to manage storage...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', loadTablespaces);
+    
+    async function loadTablespaces() {
+        const listDiv = document.getElementById('tablespaceList');
+        listDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+        
+        const result = await apiCall('/api/storage/tablespaces');
+        
+        if (result.success) {
+            listDiv.innerHTML = `<pre class="mb-0" style="font-size: 12px;">${result.output}</pre>`;
+        } else {
+            listDiv.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+        }
+    }
+    
+    async function createTablespace(event) {
+        event.preventDefault();
+        
+        const name = document.getElementById('tsName').value;
+        const size = document.getElementById('tsSize').value;
+        const autoextend = document.getElementById('tsAutoextend').checked;
+        
+        appendStorageOutput(`Creating tablespace ${name} (${size})...`);
+        
+        const result = await apiCall('/api/storage/tablespace/create', 'POST', {
+            name: name,
+            size: size,
+            autoextend: autoextend
+        });
+        
+        if (result.success) {
+            appendStorageOutput('✅ Tablespace created successfully!');
+            appendStorageOutput(result.output);
+            loadTablespaces();
+            document.getElementById('createTsForm').reset();
+        } else {
+            appendStorageOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function multiplexControlFile() {
+        appendStorageOutput('Adding control file copy...');
+        
+        const result = await apiCall('/api/storage/controlfile/multiplex', 'POST');
+        
+        if (result.success) {
+            appendStorageOutput('✅ Control file copy added!');
+            appendStorageOutput(result.output);
+        } else {
+            appendStorageOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function listControlFiles() {
+        appendStorageOutput('Listing control files...');
+        
+        const result = await apiCall('/api/storage/controlfile/list');
+        
+        if (result.success) {
+            appendStorageOutput(result.output);
+        } else {
+            appendStorageOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function multiplexRedoLog() {
+        appendStorageOutput('Adding redo log member...');
+        
+        const result = await apiCall('/api/storage/redolog/multiplex', 'POST');
+        
+        if (result.success) {
+            appendStorageOutput('✅ Redo log member added!');
+            appendStorageOutput(result.output);
+        } else {
+            appendStorageOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function listRedoLogs() {
+        appendStorageOutput('Listing redo logs...');
+        
+        const result = await apiCall('/api/storage/redolog/list');
+        
+        if (result.success) {
+            appendStorageOutput(result.output);
+        } else {
+            appendStorageOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    function appendStorageOutput(text) {
+        const output = document.getElementById('storageOutput');
+        const timestamp = new Date().toLocaleTimeString();
+        output.textContent += `\n[${timestamp}] ${text}`;
+        output.scrollTop = output.scrollHeight;
+    }
+</script>
+{% endblock %}

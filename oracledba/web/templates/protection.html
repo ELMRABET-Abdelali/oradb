@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+
+{% block title %}Protection - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-shield-alt"></i> Data Protection</h1>
+            <p class="text-muted">ARCHIVELOG, FRA, RMAN, and Flashback configuration</p>
+        </div>
+    </div>
+
+    <!-- Protection Status -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <i class="fas fa-archive fa-3x text-primary mb-3"></i>
+                    <h6>ARCHIVELOG</h6>
+                    <span class="status-badge status-unknown" id="archivelogStatus">Checking...</span>
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-success w-100 mb-1" onclick="enableArchivelog()">
+                            <i class="fas fa-play"></i> Enable
+                        </button>
+                        <button class="btn btn-sm btn-info w-100" onclick="checkArchivelog()">
+                            <i class="fas fa-info-circle"></i> Status
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <i class="fas fa-folder fa-3x text-success mb-3"></i>
+                    <h6>Fast Recovery Area</h6>
+                    <span class="status-badge status-unknown" id="fraStatus">Checking...</span>
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-success w-100 mb-1" onclick="configureFRA()">
+                            <i class="fas fa-cog"></i> Configure
+                        </button>
+                        <button class="btn btn-sm btn-info w-100" onclick="checkFRA()">
+                            <i class="fas fa-info-circle"></i> Status
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <i class="fas fa-history fa-3x text-warning mb-3"></i>
+                    <h6>Flashback Database</h6>
+                    <span class="status-badge status-unknown" id="flashbackStatus">Checking...</span>
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-success w-100 mb-1" onclick="enableFlashback()">
+                            <i class="fas fa-play"></i> Enable
+                        </button>
+                        <button class="btn btn-sm btn-info w-100" onclick="checkFlashback()">
+                            <i class="fas fa-info-circle"></i> Status
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <i class="fas fa-save fa-3x text-danger mb-3"></i>
+                    <h6>RMAN Backup</h6>
+                    <span class="status-badge status-unknown" id="rmanStatus">Ready</span>
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-success w-100 mb-1" onclick="rmanBackup('full')">
+                            <i class="fas fa-database"></i> Full Backup
+                        </button>
+                        <button class="btn btn-sm btn-warning w-100" onclick="rmanBackup('inc')">
+                            <i class="fas fa-plus"></i> Incremental
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RMAN Configuration -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-cogs"></i> RMAN Configuration
+                </div>
+                <div class="card-body">
+                    <form id="rmanConfigForm" class="row g-3" onsubmit="configureRMAN(event)">
+                        <div class="col-md-3">
+                            <label class="form-label">Retention Days</label>
+                            <input type="number" class="form-control" id="rmanRetention" value="7" min="1">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Backup Destination</label>
+                            <input type="text" class="form-control" id="rmanDest" value="/u01/backup">
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="rmanCompress" checked>
+                                <label class="form-check-label" for="rmanCompress">
+                                    Enable compression
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-save"></i> Apply Config
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flashback Operations -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-undo"></i> Flashback Database
+                </div>
+                <div class="card-body">
+                    <p>Point-in-time database recovery</p>
+                    <div class="mb-3">
+                        <label class="form-label">Flashback To (minutes ago)</label>
+                        <input type="number" class="form-control" id="flashbackMinutes" value="60" min="1">
+                    </div>
+                    <button class="btn btn-warning w-100" onclick="flashbackDatabase()">
+                        <i class="fas fa-history"></i> Flashback Database
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-table"></i> Flashback Table
+                </div>
+                <div class="card-body">
+                    <p>Recover individual table to previous state</p>
+                    <div class="mb-3">
+                        <label class="form-label">Table Name</label>
+                        <input type="text" class="form-control" id="flashbackTable" placeholder="SCHEMA.TABLE_NAME">
+                    </div>
+                    <button class="btn btn-warning w-100" onclick="flashbackTable()">
+                        <i class="fas fa-undo"></i> Flashback Table
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Output -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-terminal"></i> Output
+                </div>
+                <div class="card-body">
+                    <div class="terminal-output" id="protectionOutput">
+Ready to configure data protection...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', checkAllStatus);
+    
+    async function checkAllStatus() {
+        checkArchivelog();
+        checkFRA();
+        checkFlashback();
+    }
+    
+    async function checkArchivelog() {
+        const result = await apiCall('/api/protection/archivelog/status');
+        updateStatusBadge('archivelogStatus', result.success, result.output);
+    }
+    
+    async function checkFRA() {
+        const result = await apiCall('/api/protection/fra/status');
+        updateStatusBadge('fraStatus', result.success, result.output);
+    }
+    
+    async function checkFlashback() {
+        const result = await apiCall('/api/protection/flashback/status');
+        updateStatusBadge('flashbackStatus', result.success, result.output);
+    }
+    
+    function updateStatusBadge(elementId, success, output) {
+        const badge = document.getElementById(elementId);
+        if (success && output.includes('enabled')) {
+            badge.className = 'status-badge status-running';
+            badge.textContent = 'Enabled';
+        } else {
+            badge.className = 'status-badge status-stopped';
+            badge.textContent = 'Disabled';
+        }
+    }
+    
+    async function enableArchivelog() {
+        appendProtectionOutput('Enabling ARCHIVELOG mode...');
+        
+        const result = await apiCall('/api/protection/archivelog/enable', 'POST');
+        
+        if (result.success) {
+            appendProtectionOutput('✅ ARCHIVELOG enabled!');
+            appendProtectionOutput(result.output);
+            checkArchivelog();
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function configureFRA() {
+        appendProtectionOutput('Configuring Fast Recovery Area...');
+        
+        const result = await apiCall('/api/protection/fra/configure', 'POST', {
+            size: '10G',
+            dest: '/u01/fra'
+        });
+        
+        if (result.success) {
+            appendProtectionOutput('✅ FRA configured!');
+            appendProtectionOutput(result.output);
+            checkFRA();
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function enableFlashback() {
+        appendProtectionOutput('Enabling Flashback Database...');
+        
+        const result = await apiCall('/api/protection/flashback/enable', 'POST');
+        
+        if (result.success) {
+            appendProtectionOutput('✅ Flashback enabled!');
+            appendProtectionOutput(result.output);
+            checkFlashback();
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function rmanBackup(type) {
+        appendProtectionOutput(`Starting RMAN ${type} backup...`);
+        
+        const result = await apiCall('/api/rman/backup', 'POST', { type: type });
+        
+        if (result.success) {
+            appendProtectionOutput('✅ Backup completed!');
+            appendProtectionOutput(result.output);
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function configureRMAN(event) {
+        event.preventDefault();
+        
+        const retention = document.getElementById('rmanRetention').value;
+        const dest = document.getElementById('rmanDest').value;
+        const compress = document.getElementById('rmanCompress').checked;
+        
+        appendProtectionOutput('Configuring RMAN...');
+        
+        const result = await apiCall('/api/rman/configure', 'POST', {
+            retention: retention,
+            dest: dest,
+            compress: compress
+        });
+        
+        if (result.success) {
+            appendProtectionOutput('✅ RMAN configured!');
+            appendProtectionOutput(result.output);
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function flashbackDatabase() {
+        const minutes = document.getElementById('flashbackMinutes').value;
+        
+        if (!confirm(`Flashback database to ${minutes} minutes ago? This will undo all changes made since then.`)) {
+            return;
+        }
+        
+        appendProtectionOutput(`Flashing back database to ${minutes} minutes ago...`);
+        
+        const result = await apiCall('/api/flashback/database', 'POST', { minutes: minutes });
+        
+        if (result.success) {
+            appendProtectionOutput('✅ Flashback completed!');
+            appendProtectionOutput(result.output);
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    async function flashbackTable() {
+        const table = document.getElementById('flashbackTable').value;
+        
+        if (!table) {
+            alert('Please enter a table name');
+            return;
+        }
+        
+        appendProtectionOutput(`Flashing back table ${table}...`);
+        
+        const result = await apiCall('/api/flashback/table', 'POST', { table: table });
+        
+        if (result.success) {
+            appendProtectionOutput('✅ Table flashback completed!');
+            appendProtectionOutput(result.output);
+        } else {
+            appendProtectionOutput(`❌ Error: ${result.error}`);
+        }
+    }
+    
+    function appendProtectionOutput(text) {
+        const output = document.getElementById('protectionOutput');
+        const timestamp = new Date().toLocaleTimeString();
+        output.textContent += `\n[${timestamp}] ${text}`;
+        output.scrollTop = output.scrollHeight;
+    }
+</script>
+{% endblock %}
