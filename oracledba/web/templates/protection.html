@@ -162,17 +162,16 @@
         </div>
     </div>
 
-    <!-- Output -->
+    <!-- Action Log -->
     <div class="row">
         <div class="col-12">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-terminal"></i> Output
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-history"></i> Action Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('protectionOutput').textContent='Ready.'"><i class="fas fa-eraser"></i> Clear</button>
                 </div>
                 <div class="card-body">
-                    <div class="terminal-output" id="protectionOutput">
-Ready to configure data protection...
-                    </div>
+                    <div class="terminal-output" id="protectionOutput" style="max-height:200px">Ready to configure data protection...</div>
                 </div>
             </div>
         </div>
@@ -191,155 +190,118 @@ Ready to configure data protection...
     }
     
     async function checkArchivelog() {
+        const badge = document.getElementById('archivelogStatus');
+        badge.textContent = 'Checking...';
+        badge.className = 'status-badge status-unknown';
         const result = await apiCall('/api/protection/archivelog/status');
-        updateStatusBadge('archivelogStatus', result.success, result.output);
+        if (result.success) {
+            const isEnabled = result.log_mode === 'ARCHIVELOG';
+            badge.textContent = isEnabled ? 'ARCHIVELOG' : 'NOARCHIVELOG';
+            badge.className = isEnabled ? 'status-badge status-running' : 'status-badge status-stopped';
+        } else {
+            badge.textContent = 'Error';
+            badge.className = 'status-badge status-stopped';
+        }
     }
     
     async function checkFRA() {
+        const badge = document.getElementById('fraStatus');
+        badge.textContent = 'Checking...';
+        badge.className = 'status-badge status-unknown';
         const result = await apiCall('/api/protection/fra/status');
-        updateStatusBadge('fraStatus', result.success, result.output);
+        if (result.success) {
+            if (result.configured) {
+                badge.textContent = `Configured (${result.size_mb} MB)`;
+                badge.className = 'status-badge status-running';
+            } else {
+                badge.textContent = 'Not Configured';
+                badge.className = 'status-badge status-stopped';
+            }
+        } else {
+            badge.textContent = 'Error';
+            badge.className = 'status-badge status-stopped';
+        }
     }
     
     async function checkFlashback() {
+        const badge = document.getElementById('flashbackStatus');
+        badge.textContent = 'Checking...';
+        badge.className = 'status-badge status-unknown';
         const result = await apiCall('/api/protection/flashback/status');
-        updateStatusBadge('flashbackStatus', result.success, result.output);
-    }
-    
-    function updateStatusBadge(elementId, success, output) {
-        const badge = document.getElementById(elementId);
-        if (success && output.includes('enabled')) {
-            badge.className = 'status-badge status-running';
-            badge.textContent = 'Enabled';
+        if (result.success) {
+            const isOn = result.flashback_on === 'YES';
+            badge.textContent = isOn ? 'Enabled' : 'Disabled';
+            badge.className = isOn ? 'status-badge status-running' : 'status-badge status-stopped';
         } else {
+            badge.textContent = 'Error';
             badge.className = 'status-badge status-stopped';
-            badge.textContent = 'Disabled';
         }
     }
     
     async function enableArchivelog() {
-        appendProtectionOutput('Enabling ARCHIVELOG mode...');
-        
+        if (!confirm('Enable ARCHIVELOG mode? This will restart the database (SHUTDOWN IMMEDIATE → STARTUP MOUNT → ALTER DATABASE ARCHIVELOG → ALTER DATABASE OPEN).')) return;
+        appendOut('Enabling ARCHIVELOG mode (database will restart)...');
         const result = await apiCall('/api/protection/archivelog/enable', 'POST');
-        
-        if (result.success) {
-            appendProtectionOutput('✅ ARCHIVELOG enabled!');
-            appendProtectionOutput(result.output);
-            checkArchivelog();
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        if (result.success) { appendOut('✅ ARCHIVELOG enabled!'); if(result.output) appendOut(result.output); checkArchivelog(); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function configureFRA() {
-        appendProtectionOutput('Configuring Fast Recovery Area...');
-        
-        const result = await apiCall('/api/protection/fra/configure', 'POST', {
-            size: '10G',
-            dest: '/u01/fra'
-        });
-        
-        if (result.success) {
-            appendProtectionOutput('✅ FRA configured!');
-            appendProtectionOutput(result.output);
-            checkFRA();
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        appendOut('Configuring Fast Recovery Area (10G)...');
+        const result = await apiCall('/api/protection/fra/enable', 'POST');
+        if (result.success) { appendOut('✅ FRA configured!'); if(result.output) appendOut(result.output); checkFRA(); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function enableFlashback() {
-        appendProtectionOutput('Enabling Flashback Database...');
-        
+        appendOut('Enabling Flashback Database...');
         const result = await apiCall('/api/protection/flashback/enable', 'POST');
-        
-        if (result.success) {
-            appendProtectionOutput('✅ Flashback enabled!');
-            appendProtectionOutput(result.output);
-            checkFlashback();
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        if (result.success) { appendOut('✅ Flashback enabled!'); if(result.output) appendOut(result.output); checkFlashback(); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function rmanBackup(type) {
-        appendProtectionOutput(`Starting RMAN ${type} backup...`);
-        
+        appendOut(`Starting RMAN ${type} backup (runs in background)...`);
         const result = await apiCall('/api/rman/backup', 'POST', { type: type });
-        
-        if (result.success) {
-            appendProtectionOutput('✅ Backup completed!');
-            appendProtectionOutput(result.output);
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        if (result.success) { appendOut('✅ Backup started! ' + (result.output || '')); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function configureRMAN(event) {
         event.preventDefault();
-        
         const retention = document.getElementById('rmanRetention').value;
-        const dest = document.getElementById('rmanDest').value;
-        const compress = document.getElementById('rmanCompress').checked;
-        
-        appendProtectionOutput('Configuring RMAN...');
-        
-        const result = await apiCall('/api/rman/configure', 'POST', {
-            retention: retention,
-            dest: dest,
-            compress: compress
-        });
-        
-        if (result.success) {
-            appendProtectionOutput('✅ RMAN configured!');
-            appendProtectionOutput(result.output);
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        appendOut(`Configuring RMAN (retention: ${retention} days)...`);
+        const result = await apiCall('/api/rman/configure', 'POST', { retention: parseInt(retention) });
+        if (result.success) { appendOut('✅ RMAN configured!'); if(result.output) appendOut(result.output); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function flashbackDatabase() {
         const minutes = document.getElementById('flashbackMinutes').value;
-        
-        if (!confirm(`Flashback database to ${minutes} minutes ago? This will undo all changes made since then.`)) {
-            return;
-        }
-        
-        appendProtectionOutput(`Flashing back database to ${minutes} minutes ago...`);
-        
-        const result = await apiCall('/api/flashback/database', 'POST', { minutes: minutes });
-        
-        if (result.success) {
-            appendProtectionOutput('✅ Flashback completed!');
-            appendProtectionOutput(result.output);
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        if (!confirm(`Flashback database to ${minutes} minutes ago? This will undo all changes made since then.`)) return;
+        const ts = new Date(Date.now() - minutes * 60000).toISOString().replace('T',' ').substring(0,19);
+        appendOut(`Flashing back database to ${minutes} minutes ago (${ts})...`);
+        const result = await apiCall('/api/flashback/database', 'POST', { timestamp: ts });
+        if (result.success) { appendOut('✅ Flashback completed!'); if(result.output) appendOut(result.output); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
     async function flashbackTable() {
         const table = document.getElementById('flashbackTable').value;
-        
-        if (!table) {
-            alert('Please enter a table name');
-            return;
-        }
-        
-        appendProtectionOutput(`Flashing back table ${table}...`);
-        
-        const result = await apiCall('/api/flashback/table', 'POST', { table: table });
-        
-        if (result.success) {
-            appendProtectionOutput('✅ Table flashback completed!');
-            appendProtectionOutput(result.output);
-        } else {
-            appendProtectionOutput(`❌ Error: ${result.error}`);
-        }
+        if (!table) { alert('Please enter a table name'); return; }
+        const minutes = prompt('Flashback to how many minutes ago?', '60');
+        if (!minutes) return;
+        const ts = new Date(Date.now() - parseInt(minutes) * 60000).toISOString().replace('T',' ').substring(0,19);
+        appendOut(`Flashing back table ${table} to ${minutes} minutes ago...`);
+        const result = await apiCall('/api/flashback/table', 'POST', { table: table, timestamp: ts });
+        if (result.success) { appendOut('✅ Table flashback completed!'); if(result.output) appendOut(result.output); }
+        else { appendOut(`❌ Error: ${result.error}`); }
     }
     
-    function appendProtectionOutput(text) {
+    function appendOut(text) {
         const output = document.getElementById('protectionOutput');
-        const timestamp = new Date().toLocaleTimeString();
-        output.textContent += `\n[${timestamp}] ${text}`;
+        const ts = new Date().toLocaleTimeString();
+        output.textContent += `\n[${ts}] ${text}`;
         output.scrollTop = output.scrollHeight;
     }
 </script>

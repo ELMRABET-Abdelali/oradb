@@ -13,7 +13,7 @@
 
     <!-- Tablespace Management -->
     <div class="row mb-4">
-        <div class="col-md-6">
+        <div class="col-md-4">
             <div class="card">
                 <div class="card-header">
                     <i class="fas fa-plus"></i> Create Tablespace
@@ -27,36 +27,50 @@
                         <div class="mb-3">
                             <label class="form-label">Size</label>
                             <input type="text" class="form-control" id="tsSize" value="500M" required>
-                            <small class="text-muted">Examples: 100M, 1G, 5G</small>
+                            <small class="text-muted">e.g. 100M, 1G, 5G</small>
                         </div>
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="tsAutoextend" checked>
-                            <label class="form-check-label" for="tsAutoextend">
-                                Enable autoextend
-                            </label>
+                            <label class="form-check-label" for="tsAutoextend">Enable autoextend</label>
                         </div>
                         <button type="submit" class="btn btn-primary w-100">
-                            <i class="fas fa-plus"></i> Create Tablespace
+                            <i class="fas fa-plus"></i> Create
                         </button>
                     </form>
                 </div>
             </div>
         </div>
         
-        <div class="col-md-6">
+        <div class="col-md-8">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-list"></i> Tablespace List
-                </div>
-                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                    <div id="tablespaceList">
-                        <div class="text-center text-muted">
-                            <i class="fas fa-spinner fa-spin"></i> Loading...
-                        </div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-hdd"></i> Tablespaces</span>
+                    <div>
+                        <span class="badge bg-info me-2" id="tsCount">0</span>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadTablespaces()">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
                     </div>
-                    <button class="btn btn-sm btn-outline-primary mt-3 w-100" onclick="loadTablespaces()">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Tablespace</th>
+                                    <th>Size (MB)</th>
+                                    <th>Used (MB)</th>
+                                    <th>Free (MB)</th>
+                                    <th>Usage</th>
+                                    <th>Auto</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tsTableBody">
+                                <tr><td colspan="7" class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -66,18 +80,23 @@
     <div class="row mb-4">
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-copy"></i> Control File Multiplexing
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-copy"></i> Control Files</span>
+                    <div>
+                        <button class="btn btn-sm btn-outline-info" onclick="loadControlFiles()"><i class="fas fa-sync-alt"></i></button>
+                        <button class="btn btn-sm btn-outline-primary ms-1" onclick="multiplexControlFile()"><i class="fas fa-plus"></i> Multiplex</button>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <p>Protect against control file corruption by maintaining multiple copies</p>
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" onclick="multiplexControlFile()">
-                            <i class="fas fa-plus"></i> Add Control File Copy
-                        </button>
-                        <button class="btn btn-outline-info" onclick="listControlFiles()">
-                            <i class="fas fa-list"></i> List Control Files
-                        </button>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr><th>File Path</th><th>Status</th></tr>
+                            </thead>
+                            <tbody id="cfTableBody">
+                                <tr><td colspan="2" class="text-center py-2 text-muted">Click refresh to load</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -85,35 +104,40 @@
         
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-redo"></i> Redo Log Multiplexing
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-redo"></i> Redo Log Groups</span>
+                    <div>
+                        <button class="btn btn-sm btn-outline-info" onclick="loadRedoLogs()"><i class="fas fa-sync-alt"></i></button>
+                        <button class="btn btn-sm btn-outline-primary ms-1" onclick="addRedoLogGroup()"><i class="fas fa-plus"></i> Add Group</button>
+                        <button class="btn btn-sm btn-outline-warning ms-1" onclick="multiplexRedoLog()"><i class="fas fa-copy"></i> Multiplex</button>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <p>Protect against redo log loss by maintaining multiple members</p>
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" onclick="multiplexRedoLog()">
-                            <i class="fas fa-plus"></i> Add Redo Log Member
-                        </button>
-                        <button class="btn btn-outline-info" onclick="listRedoLogs()">
-                            <i class="fas fa-list"></i> List Redo Logs
-                        </button>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr><th>Group</th><th>Member</th><th>Size</th><th>Status</th><th>Members</th></tr>
+                            </thead>
+                            <tbody id="rlTableBody">
+                                <tr><td colspan="5" class="text-center py-2 text-muted">Click refresh to load</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Output -->
+    <!-- Action Log -->
     <div class="row">
         <div class="col-12">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-terminal"></i> Output
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-history"></i> Action Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('storageOutput').textContent='Ready.'"><i class="fas fa-eraser"></i> Clear</button>
                 </div>
                 <div class="card-body">
-                    <div class="terminal-output" id="storageOutput">
-Ready to manage storage...
-                    </div>
+                    <div class="terminal-output" id="storageOutput" style="max-height:180px">Ready to manage storage...</div>
                 </div>
             </div>
         </div>
@@ -123,100 +147,111 @@ Ready to manage storage...
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', loadTablespaces);
+    document.addEventListener('DOMContentLoaded', () => { loadTablespaces(); loadControlFiles(); loadRedoLogs(); });
     
     async function loadTablespaces() {
-        const listDiv = document.getElementById('tablespaceList');
-        listDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
-        
+        const tbody = document.getElementById('tsTableBody');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
         const result = await apiCall('/api/storage/tablespaces');
-        
-        if (result.success) {
-            listDiv.innerHTML = `<pre class="mb-0" style="font-size: 12px;">${result.output}</pre>`;
-        } else {
-            listDiv.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+        if (!result.success) { tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${result.error}</td></tr>`; return; }
+        const tsList = result.tablespaces || [];
+        document.getElementById('tsCount').textContent = tsList.length;
+        if (tsList.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center">No tablespaces found</td></tr>'; return; }
+        let html = '';
+        for (const ts of tsList) {
+            const pct = ts.pct_used || 0;
+            const barColor = pct >= 90 ? 'bg-danger' : pct >= 75 ? 'bg-warning' : 'bg-success';
+            const isSys = ['SYSTEM','SYSAUX','UNDOTBS1','TEMP'].includes(ts.name);
+            html += `<tr>
+                <td><strong>${ts.name}</strong></td>
+                <td>${ts.size_mb}</td><td>${ts.used_mb}</td><td>${ts.free_mb}</td>
+                <td><div class="progress" style="height:20px;min-width:100px">
+                    <div class="progress-bar ${barColor}" style="width:${pct}%">${pct}%</div>
+                </div></td>
+                <td><span class="badge ${ts.autoext==='YES'?'bg-success':'bg-secondary'}">${ts.autoext}</span></td>
+                <td class="text-end">${isSys ? '' : `<button class="btn btn-sm btn-outline-danger" onclick="dropTablespace('${ts.name}')"><i class="fas fa-trash"></i></button>`}</td>
+            </tr>`;
         }
+        tbody.innerHTML = html;
+    }
+    
+    async function loadControlFiles() {
+        const tbody = document.getElementById('cfTableBody');
+        tbody.innerHTML = '<tr><td colspan="2" class="text-center py-2"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        const result = await apiCall('/api/storage/controlfile/list');
+        if (!result.success) { tbody.innerHTML = `<tr><td colspan="2" class="text-danger">${result.error}</td></tr>`; return; }
+        const files = result.controlfiles || [];
+        if (files.length === 0) { tbody.innerHTML = '<tr><td colspan="2" class="text-muted text-center">No control files found</td></tr>'; return; }
+        tbody.innerHTML = files.map(f => `<tr><td><i class="fas fa-file text-primary"></i> <code>${f.name}</code></td><td><span class="badge bg-success">${f.status}</span></td></tr>`).join('');
+    }
+    
+    async function loadRedoLogs() {
+        const tbody = document.getElementById('rlTableBody');
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-2"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+        const result = await apiCall('/api/storage/redolog/list');
+        if (!result.success) { tbody.innerHTML = `<tr><td colspan="5" class="text-danger">${result.error}</td></tr>`; return; }
+        const logs = result.redologs || [];
+        if (logs.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No redo logs found</td></tr>'; return; }
+        let html = '';
+        for (const r of logs) {
+            const statusBadge = r.status === 'CURRENT' ? 'bg-success' : r.status === 'ACTIVE' ? 'bg-warning' : 'bg-secondary';
+            html += `<tr>
+                <td><strong>${r.group}</strong></td>
+                <td><code style="font-size:11px">${r.member}</code></td>
+                <td>${r.size_mb} MB</td>
+                <td><span class="badge ${statusBadge}">${r.status}</span></td>
+                <td>${r.members}</td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
     }
     
     async function createTablespace(event) {
         event.preventDefault();
-        
         const name = document.getElementById('tsName').value;
         const size = document.getElementById('tsSize').value;
         const autoextend = document.getElementById('tsAutoextend').checked;
-        
-        appendStorageOutput(`Creating tablespace ${name} (${size})...`);
-        
-        const result = await apiCall('/api/storage/tablespace/create', 'POST', {
-            name: name,
-            size: size,
-            autoextend: autoextend
-        });
-        
-        if (result.success) {
-            appendStorageOutput('✅ Tablespace created successfully!');
-            appendStorageOutput(result.output);
-            loadTablespaces();
-            document.getElementById('createTsForm').reset();
-        } else {
-            appendStorageOutput(`❌ Error: ${result.error}`);
-        }
+        appendOut(`Creating tablespace ${name} (${size})...`);
+        const result = await apiCall('/api/storage/tablespace/create', 'POST', { name, size, autoextend });
+        if (result.success) { appendOut('✅ Tablespace created!'); loadTablespaces(); document.getElementById('createTsForm').reset(); }
+        else { appendOut(`❌ ${result.error}`); }
+    }
+    
+    async function dropTablespace(name) {
+        if (!confirm(`Drop tablespace ${name}? This will delete all data!`)) return;
+        appendOut(`Dropping tablespace ${name}...`);
+        const result = await apiCall(`/api/storage/tablespace/${name}/drop`, 'POST');
+        if (result.success) { appendOut('✅ Tablespace dropped.'); loadTablespaces(); }
+        else { appendOut(`❌ ${result.error}`); }
     }
     
     async function multiplexControlFile() {
-        appendStorageOutput('Adding control file copy...');
-        
+        appendOut('Running TP04 for control file multiplexing...');
         const result = await apiCall('/api/storage/controlfile/multiplex', 'POST');
-        
-        if (result.success) {
-            appendStorageOutput('✅ Control file copy added!');
-            appendStorageOutput(result.output);
-        } else {
-            appendStorageOutput(`❌ Error: ${result.error}`);
-        }
-    }
-    
-    async function listControlFiles() {
-        appendStorageOutput('Listing control files...');
-        
-        const result = await apiCall('/api/storage/controlfile/list');
-        
-        if (result.success) {
-            appendStorageOutput(result.output);
-        } else {
-            appendStorageOutput(`❌ Error: ${result.error}`);
-        }
+        if (result.success) { appendOut('✅ Control file multiplex started!'); setTimeout(loadControlFiles, 3000); }
+        else { appendOut(`❌ ${result.error}`); }
     }
     
     async function multiplexRedoLog() {
-        appendStorageOutput('Adding redo log member...');
-        
+        appendOut('Running TP04 for redo log multiplexing...');
         const result = await apiCall('/api/storage/redolog/multiplex', 'POST');
-        
-        if (result.success) {
-            appendStorageOutput('✅ Redo log member added!');
-            appendStorageOutput(result.output);
-        } else {
-            appendStorageOutput(`❌ Error: ${result.error}`);
-        }
+        if (result.success) { appendOut('✅ Redo log multiplex started!'); setTimeout(loadRedoLogs, 3000); }
+        else { appendOut(`❌ ${result.error}`); }
     }
     
-    async function listRedoLogs() {
-        appendStorageOutput('Listing redo logs...');
-        
-        const result = await apiCall('/api/storage/redolog/list');
-        
-        if (result.success) {
-            appendStorageOutput(result.output);
-        } else {
-            appendStorageOutput(`❌ Error: ${result.error}`);
-        }
+    async function addRedoLogGroup() {
+        const size = prompt('Redo log group size (e.g. 200M):', '200M');
+        if (!size) return;
+        appendOut(`Adding redo log group (${size})...`);
+        const result = await apiCall('/api/storage/redolog/add', 'POST', { size });
+        if (result.success) { appendOut('✅ Redo log group added!'); loadRedoLogs(); }
+        else { appendOut(`❌ ${result.error}`); }
     }
     
-    function appendStorageOutput(text) {
+    function appendOut(text) {
         const output = document.getElementById('storageOutput');
-        const timestamp = new Date().toLocaleTimeString();
-        output.textContent += `\n[${timestamp}] ${text}`;
+        const ts = new Date().toLocaleTimeString();
+        output.textContent += `\n[${ts}] ${text}`;
         output.scrollTop = output.scrollHeight;
     }
 </script>

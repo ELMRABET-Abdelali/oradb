@@ -54,39 +54,69 @@
         </div>
     </div>
 
-    <!-- Database List -->
-    <div class="row">
+    <!-- CDB Instance Info -->
+    <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-list"></i> Existing Databases</span>
-                    <button class="btn btn-sm btn-outline-primary" onclick="loadDatabases()">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-server"></i> CDB Instance</span>
+                    <button class="btn btn-sm btn-light" onclick="loadDatabases()">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
-                <div class="card-body">
-                    <div id="databaseList">
-                        <div class="text-center text-muted py-4">
-                            <i class="fas fa-spinner fa-spin fa-2x"></i>
-                            <p class="mt-2">Loading databases...</p>
-                        </div>
+                <div class="card-body" id="cdbInfo">
+                    <div class="text-center text-muted py-2">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Output -->
-    <div class="row mt-4">
+    <!-- PDB List Table -->
+    <div class="row mb-4">
         <div class="col-12">
             <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-terminal"></i> Output
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-cubes"></i> Pluggable Databases</span>
+                    <span class="badge bg-info" id="pdbCount">0</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" id="pdbTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Open Mode</th>
+                                    <th>CON_ID</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pdbTableBody">
+                                <tr><td colspan="5" class="text-center text-muted py-4">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Log -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-history"></i> Action Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('dbOutput').textContent='Ready.'">
+                        <i class="fas fa-eraser"></i> Clear
+                    </button>
                 </div>
                 <div class="card-body">
-                    <div class="terminal-output" id="dbOutput">
-Ready to manage databases...
-                    </div>
+                    <div class="terminal-output" id="dbOutput" style="max-height:200px">Ready to manage databases...</div>
                 </div>
             </div>
         </div>
@@ -96,50 +126,82 @@ Ready to manage databases...
 
 {% block extra_js %}
 <script>
-    // Load on page load
     document.addEventListener('DOMContentLoaded', loadDatabases);
     
     async function loadDatabases() {
-        const listDiv = document.getElementById('databaseList');
-        listDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
-        
         const result = await apiCall('/api/databases/list');
-        
-        if (result.success) {
-            displayDatabases(result.output);
-        } else {
-            listDiv.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
-        }
-    }
-    
-    function displayDatabases(output) {
-        const listDiv = document.getElementById('databaseList');
-        
-        // Parse output (this is a simplified version - adjust based on actual output format)
-        if (output.includes('No databases found') || output.trim() === '') {
-            listDiv.innerHTML = '<div class="alert alert-info">No databases found. Create one above.</div>';
+        if (!result.success) {
+            document.getElementById('cdbInfo').innerHTML = `<div class="alert alert-danger mb-0">${result.error}</div>`;
+            document.getElementById('pdbTableBody').innerHTML = `<tr><td colspan="5" class="text-danger">${result.error}</td></tr>`;
             return;
         }
-        
-        listDiv.innerHTML = `<pre class="mb-0">${output}</pre>`;
+        // CDB info
+        const cdb = result.cdb || {};
+        if (cdb.instance_name) {
+            const statusClass = cdb.status === 'OPEN' ? 'success' : 'warning';
+            document.getElementById('cdbInfo').innerHTML = `
+                <div class="row text-center">
+                    <div class="col-md-4"><h5>${cdb.instance_name}</h5><small class="text-muted">Instance Name</small></div>
+                    <div class="col-md-4"><span class="badge bg-${statusClass} fs-6">${cdb.status}</span><br><small class="text-muted">Status</small></div>
+                    <div class="col-md-4"><span class="badge bg-info fs-6">${cdb.database_status}</span><br><small class="text-muted">Database Status</small></div>
+                </div>`;
+        } else {
+            document.getElementById('cdbInfo').innerHTML = '<div class="alert alert-warning mb-0">Could not retrieve CDB info</div>';
+        }
+        // PDB table
+        const pdbs = result.pdbs || [];
+        document.getElementById('pdbCount').textContent = pdbs.length;
+        if (pdbs.length === 0) {
+            document.getElementById('pdbTableBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No pluggable databases found. Create one above.</td></tr>';
+            return;
+        }
+        let html = '';
+        for (const pdb of pdbs) {
+            const isOpen = pdb.open_mode && pdb.open_mode.includes('READ');
+            const statusBadge = isOpen
+                ? '<span class="badge bg-success">Online</span>'
+                : '<span class="badge bg-secondary">Closed</span>';
+            const openBtn = isOpen
+                ? `<button class="btn btn-sm btn-outline-warning" onclick="pdbAction('${pdb.name}','close')"><i class="fas fa-stop"></i> Close</button>`
+                : `<button class="btn btn-sm btn-outline-success" onclick="pdbAction('${pdb.name}','open')"><i class="fas fa-play"></i> Open</button>`;
+            html += `<tr>
+                <td><strong><i class="fas fa-database text-primary"></i> ${pdb.name}</strong></td>
+                <td>${pdb.open_mode || 'N/A'}</td>
+                <td>${pdb.con_id}</td>
+                <td>${statusBadge}</td>
+                <td class="text-end">
+                    <div class="btn-group btn-group-sm">
+                        ${openBtn}
+                        <button class="btn btn-sm btn-outline-danger" onclick="pdbAction('${pdb.name}','drop')"><i class="fas fa-trash"></i> Drop</button>
+                    </div>
+                </td>
+            </tr>`;
+        }
+        document.getElementById('pdbTableBody').innerHTML = html;
+    }
+    
+    async function pdbAction(name, action) {
+        if (action === 'drop' && !confirm(`Drop PDB ${name}? This will delete all data permanently!`)) return;
+        appendDbOutput(`${action === 'drop' ? 'Dropping' : action === 'close' ? 'Closing' : 'Opening'} PDB ${name}...`);
+        const result = await apiCall(`/api/databases/pdb/${name}/${action}`, 'POST');
+        if (result.success) {
+            appendDbOutput(`✅ PDB ${name} ${action} completed.`);
+            if (result.output) appendDbOutput(result.output);
+            loadDatabases();
+        } else {
+            appendDbOutput(`❌ Error: ${result.error}`);
+        }
     }
     
     async function createDatabase(event) {
         event.preventDefault();
-        
         const sid = document.getElementById('dbSid').value;
         const memory = document.getElementById('dbMemory').value;
-        
-        appendDbOutput(`Creating database ${sid} with ${memory}MB memory...`);
-        
-        const result = await apiCall('/api/databases/create', 'POST', {
-            sid: sid,
-            memory: parseInt(memory)
-        });
-        
+        appendDbOutput(`Creating PDB ${sid}...`);
+        const result = await apiCall('/api/databases/create', 'POST', { sid: sid, memory: parseInt(memory) });
         if (result.success) {
-            appendDbOutput('✅ Database created successfully!');
-            appendDbOutput(result.output);
+            appendDbOutput('✅ PDB created successfully!');
+            if (result.output) appendDbOutput(result.output);
             loadDatabases();
         } else {
             appendDbOutput(`❌ Error: ${result.error}`);
@@ -148,8 +210,8 @@ Ready to manage databases...
     
     function appendDbOutput(text) {
         const output = document.getElementById('dbOutput');
-        const timestamp = new Date().toLocaleTimeString();
-        output.textContent += `\n[${timestamp}] ${text}`;
+        const ts = new Date().toLocaleTimeString();
+        output.textContent += `\n[${ts}] ${text}`;
         output.scrollTop = output.scrollHeight;
     }
 </script>

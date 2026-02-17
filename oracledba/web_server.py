@@ -161,37 +161,19 @@ class SystemDetector:
         }
     
     def _run_sql(self, sql, timeout=30):
-        """Run SQL via sqlplus and return raw output"""
-        env = os.environ.copy()
-        env['ORACLE_HOME'] = self.oracle_home
-        env['ORACLE_SID'] = os.environ.get('ORACLE_SID', 'GDCPROD')
-        env['PATH'] = f"{self.oracle_home}/bin:" + env.get('PATH', '')
-
-        full_sql = f"""SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"""
+        """Run SQL via sqlplus and return raw output (uses stdin pipe to preserve $ in view names)"""
+        full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"
         try:
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, prefix='oradba_') as f:
-                f.write(full_sql)
-                sql_file = f.name
-            os.chmod(sql_file, 0o644)
-
-            uid = -1
-            try:
-                uid = os.getuid()
-            except AttributeError:
-                uid = -1
+            uid = os.getuid() if hasattr(os, 'getuid') else -1
             if uid == 0:
                 cmd = ['su', '-', 'oracle', '-c',
-                       f'{self.oracle_home}/bin/sqlplus -s "/ as sysdba" < {sql_file}']
+                       f'{self.oracle_home}/bin/sqlplus -s "/ as sysdba"']
             else:
-                cmd = ['bash', '-c',
-                       f'{self.oracle_home}/bin/sqlplus -s "/ as sysdba" < {sql_file}']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
-            try:
-                os.unlink(sql_file)
-            except OSError:
-                pass
-            return result.stdout.strip()
+                cmd = [f'{self.oracle_home}/bin/sqlplus', '-s', '/ as sysdba']
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, _ = proc.communicate(input=full_sql, timeout=timeout)
+            return stdout.strip()
         except Exception as e:
             return f"SQL Error: {e}"
 
@@ -233,7 +215,7 @@ class SystemDetector:
             # SGA components
             sga_out = self._run_sql(
                 "SELECT component, ROUND(current_size/1024/1024, 2) AS size_mb "
-                "FROM v\\$sga_dynamic_components WHERE current_size > 0;"
+                "FROM v$sga_dynamic_components WHERE current_size > 0;"
             )
             for row in self._parse_sql_rows(sga_out):
                 try:
@@ -250,7 +232,7 @@ class SystemDetector:
         try:
             # PGA stats
             pga_out = self._run_sql(
-                "SELECT name, ROUND(value/1024/1024, 2) AS size_mb FROM v\\$pgastat "
+                "SELECT name, ROUND(value/1024/1024, 2) AS size_mb FROM v$pgastat "
                 "WHERE name IN ('total PGA allocated','total PGA inuse','maximum PGA allocated');"
             )
             for row in self._parse_sql_rows(pga_out):
@@ -268,12 +250,12 @@ class SystemDetector:
 
         try:
             # Processes & sessions
-            proc_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$process;")
+            proc_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$process;")
             for row in self._parse_sql_rows(proc_out):
                 try: metrics['processes']['count'] = int(row.get('CNT', 0))
                 except: pass
 
-            sess_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$session;")
+            sess_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$session;")
             for row in self._parse_sql_rows(sess_out):
                 try: metrics['sessions']['count'] = int(row.get('CNT', 0))
                 except: pass
@@ -282,12 +264,12 @@ class SystemDetector:
 
         try:
             # Datafiles & tempfiles
-            df_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$datafile;")
+            df_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$datafile;")
             for row in self._parse_sql_rows(df_out):
                 try: metrics['datafiles'] = int(row.get('CNT', 0))
                 except: pass
 
-            tf_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v\\$tempfile;")
+            tf_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$tempfile;")
             for row in self._parse_sql_rows(tf_out):
                 try: metrics['tempfiles'] = int(row.get('CNT', 0))
                 except: pass
@@ -792,18 +774,31 @@ def databases():
 @app.route('/api/databases/list')
 @login_required
 def api_databases_list():
-    """API: List all databases (CDB + PDBs)"""
+    """API: List all databases (CDB + PDBs) as structured JSON"""
     try:
-        # Get CDB instance info
         instance_info = run_sqlplus(
             "SELECT INSTANCE_NAME, STATUS, DATABASE_STATUS FROM V$INSTANCE;"
         )
-        # Get PDB info
         pdb_info = run_sqlplus(
             "SELECT NAME, OPEN_MODE, CON_ID FROM V$PDBS ORDER BY CON_ID;"
         )
-        output = "=== CDB Instance ===\n" + instance_info + "\n\n=== Pluggable Databases ===\n" + pdb_info
-        return jsonify({'success': True, 'output': output})
+        cdb_rows = parse_sql_rows(instance_info)
+        pdb_rows = parse_sql_rows(pdb_info)
+        cdb = {}
+        if cdb_rows:
+            cdb = {
+                'instance_name': cdb_rows[0].get('INSTANCE_NAME', ''),
+                'status': cdb_rows[0].get('STATUS', ''),
+                'database_status': cdb_rows[0].get('DATABASE_STATUS', '')
+            }
+        pdbs = []
+        for row in pdb_rows:
+            pdbs.append({
+                'name': row.get('NAME', ''),
+                'open_mode': row.get('OPEN_MODE', ''),
+                'con_id': row.get('CON_ID', '')
+            })
+        return jsonify({'success': True, 'cdb': cdb, 'pdbs': pdbs})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -832,6 +827,42 @@ ALTER PLUGGABLE DATABASE {sid} SAVE STATE;"""
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/api/databases/pdb/<name>/open', methods=['POST'])
+@login_required
+@admin_required
+def api_databases_pdb_open(name):
+    """API: Open a PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name.'})
+    result = run_sqlplus(f"ALTER PLUGGABLE DATABASE {name.upper()} OPEN;\nALTER PLUGGABLE DATABASE {name.upper()} SAVE STATE;")
+    return jsonify({'success': True, 'output': result})
+
+
+@app.route('/api/databases/pdb/<name>/close', methods=['POST'])
+@login_required
+@admin_required
+def api_databases_pdb_close(name):
+    """API: Close a PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name.'})
+    result = run_sqlplus(f"ALTER PLUGGABLE DATABASE {name.upper()} CLOSE IMMEDIATE;")
+    return jsonify({'success': True, 'output': result})
+
+
+@app.route('/api/databases/pdb/<name>/drop', methods=['POST'])
+@login_required
+@admin_required
+def api_databases_pdb_drop(name):
+    """API: Drop a PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name.'})
+    result = run_sqlplus(f"ALTER PLUGGABLE DATABASE {name.upper()} CLOSE IMMEDIATE;\nDROP PLUGGABLE DATABASE {name.upper()} INCLUDING DATAFILES;")
+    return jsonify({'success': True, 'output': result})
+
+
 # ============================================================================
 # STORAGE MANAGEMENT ROUTES
 # ============================================================================
@@ -846,9 +877,9 @@ def storage():
 @app.route('/api/storage/tablespaces')
 @login_required
 def api_storage_tablespaces():
-    """API: List tablespaces with size info"""
+    """API: List tablespaces with size info as structured JSON"""
     try:
-        sql = """SELECT df.tablespace_name,
+        sql = """SELECT df.tablespace_name AS "TABLESPACE_NAME",
        ROUND(df.bytes/1024/1024) AS "SIZE_MB",
        ROUND(NVL(fs.bytes,0)/1024/1024) AS "FREE_MB",
        ROUND((df.bytes - NVL(fs.bytes,0))/1024/1024) AS "USED_MB",
@@ -860,7 +891,22 @@ LEFT JOIN (SELECT tablespace_name, SUM(bytes) bytes
   ON df.tablespace_name = fs.tablespace_name
 ORDER BY df.tablespace_name;"""
         result = run_sqlplus(sql)
-        return jsonify({'success': True, 'output': result})
+        rows = parse_sql_rows(result)
+        tablespaces = []
+        for row in rows:
+            try:
+                size = float(row.get('SIZE_MB', 0))
+                free = float(row.get('FREE_MB', 0))
+                used = float(row.get('USED_MB', 0))
+                pct = round((used / size * 100) if size > 0 else 0, 1)
+            except (ValueError, TypeError, ZeroDivisionError):
+                size = free = used = pct = 0
+            tablespaces.append({
+                'name': row.get('TABLESPACE_NAME', ''),
+                'size_mb': size, 'free_mb': free, 'used_mb': used,
+                'pct_used': pct, 'autoext': row.get('AUTOEXT', 'NO')
+            })
+        return jsonify({'success': True, 'tablespaces': tablespaces})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -902,10 +948,13 @@ def protection():
 @app.route('/api/protection/archivelog/status')
 @login_required
 def api_protection_archivelog_status():
-    """API: ARCHIVELOG status"""
+    """API: ARCHIVELOG status - returns structured JSON"""
     try:
         result = run_sqlplus("SELECT LOG_MODE, FLASHBACK_ON FROM V$DATABASE;")
-        return jsonify({'success': True, 'output': result})
+        rows = parse_sql_rows(result)
+        log_mode = rows[0].get('LOG_MODE', 'UNKNOWN') if rows else 'UNKNOWN'
+        flashback_on = rows[0].get('FLASHBACK_ON', 'NO') if rows else 'NO'
+        return jsonify({'success': True, 'log_mode': log_mode, 'flashback_on': flashback_on})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -958,14 +1007,24 @@ def security():
 @app.route('/api/security/users')
 @login_required
 def api_security_users():
-    """API: List database users"""
+    """API: List database users as structured JSON"""
     try:
-        sql = """SELECT username, account_status, default_tablespace, profile, created
-FROM dba_users
-WHERE oracle_maintained = 'N'
-ORDER BY username;"""
+        sql = """SELECT username AS "USERNAME", account_status AS "ACCOUNT_STATUS",
+       default_tablespace AS "DEFAULT_TABLESPACE", profile AS "PROFILE",
+       TO_CHAR(created, 'YYYY-MM-DD') AS "CREATED"
+FROM dba_users WHERE oracle_maintained = 'N' ORDER BY username;"""
         result = run_sqlplus(sql)
-        return jsonify({'success': True, 'output': result})
+        rows = parse_sql_rows(result)
+        users = []
+        for row in rows:
+            users.append({
+                'username': row.get('USERNAME', ''),
+                'account_status': row.get('ACCOUNT_STATUS', ''),
+                'default_tablespace': row.get('DEFAULT_TABLESPACE', ''),
+                'profile': row.get('PROFILE', ''),
+                'created': row.get('CREATED', '')
+            })
+        return jsonify({'success': True, 'users': users})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -997,6 +1056,33 @@ ALTER USER {username} QUOTA UNLIMITED ON {default_ts};"""
         return jsonify({'success': True, 'output': f'User {username} created.\n{result}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/security/user/<name>/lock', methods=['POST'])
+@login_required
+@admin_required
+def api_security_user_lock(name):
+    """API: Lock a database user"""
+    result = run_sqlplus(f"ALTER USER {name.upper()} ACCOUNT LOCK;")
+    return jsonify({'success': True, 'output': result})
+
+
+@app.route('/api/security/user/<name>/unlock', methods=['POST'])
+@login_required
+@admin_required
+def api_security_user_unlock(name):
+    """API: Unlock a database user"""
+    result = run_sqlplus(f"ALTER USER {name.upper()} ACCOUNT UNLOCK;")
+    return jsonify({'success': True, 'output': result})
+
+
+@app.route('/api/security/user/<name>/drop', methods=['POST'])
+@login_required
+@admin_required
+def api_security_user_drop(name):
+    """API: Drop a database user"""
+    result = run_sqlplus(f"DROP USER {name.upper()} CASCADE;")
+    return jsonify({'success': True, 'output': result})
 
 
 # ============================================================================
@@ -1665,54 +1751,43 @@ def execute_cli_command(args, timeout=300):
 
 
 def run_sqlplus(sql, as_sysdba=True, timeout=60):
-    """Run SQL command via sqlplus and return output"""
+    """Run SQL command via sqlplus and return output (uses stdin pipe to preserve $ in V$ view names)"""
     oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
     oracle_sid = os.environ.get('ORACLE_SID', 'GDCPROD')
     
-    env = os.environ.copy()
-    env['ORACLE_HOME'] = oracle_home
-    env['ORACLE_SID'] = oracle_sid
-    env['PATH'] = f"{oracle_home}/bin:" + env.get('PATH', '')
-    
     connect_str = '/ as sysdba' if as_sysdba else '/'
     
-    full_sql = f"""SET PAGESIZE 1000
-SET LINESIZE 200
-SET FEEDBACK OFF
-SET HEADING ON
-{sql}
-EXIT;
-"""
+    full_sql = f"SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"
     
     try:
-        # Write SQL to temp file to avoid shell escaping issues with $ in V$views
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, prefix='oradba_') as f:
-            f.write(full_sql)
-            sql_file = f.name
-        os.chmod(sql_file, 0o644)
-
-        # Try as oracle user if running as root
-        uid = -1
-        try:
-            uid = os.getuid()
-        except AttributeError:
-            uid = -1
-        
+        uid = os.getuid() if hasattr(os, 'getuid') else -1
         if uid == 0:
-            cmd = ['su', '-', 'oracle', '-c', f'{oracle_home}/bin/sqlplus -s "{connect_str}" < {sql_file}']
+            cmd = ['su', '-', 'oracle', '-c',
+                   f'{oracle_home}/bin/sqlplus -s "{connect_str}"']
         else:
-            cmd = ['bash', '-c', f'{oracle_home}/bin/sqlplus -s "{connect_str}" < {sql_file}']
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
-        # Clean up temp file
-        try:
-            os.unlink(sql_file)
-        except OSError:
-            pass
-        return result.stdout.strip()
+            cmd = [f'{oracle_home}/bin/sqlplus', '-s', connect_str]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, _ = proc.communicate(input=full_sql, timeout=timeout)
+        return stdout.strip()
     except Exception as e:
         return f"SQL Error: {str(e)}"
+
+
+def parse_sql_rows(output):
+    """Parse pipe-delimited sqlplus output into list of dicts"""
+    rows = []
+    lines = [l.strip() for l in output.split('\n') if l.strip()]
+    if len(lines) < 2:
+        return rows
+    headers = [h.strip() for h in lines[0].split('|')]
+    for line in lines[1:]:
+        if set(line.replace(' ', '').replace('|', '')) <= {'-'}:
+            continue
+        vals = [v.strip() for v in line.split('|')]
+        if len(vals) >= len(headers):
+            rows.append(dict(zip(headers, vals[:len(headers)])))
+    return rows
 
 
 def run_tp_script(tp_number, background=True, as_user='oracle'):
@@ -2032,9 +2107,11 @@ def api_storage_controlfile_multiplex():
 @app.route('/api/storage/controlfile/list')
 @login_required
 def api_storage_controlfile_list():
-    """API: List control files"""
-    output = run_sqlplus("SELECT name, status FROM v\\$controlfile;")
-    return jsonify({'success': True, 'output': output})
+    """API: List control files as structured JSON"""
+    output = run_sqlplus("SELECT name AS \"NAME\", NVL(status, 'OK') AS \"STATUS\" FROM v$controlfile;")
+    rows = parse_sql_rows(output)
+    controlfiles = [{'name': r.get('NAME', ''), 'status': r.get('STATUS', '')} for r in rows]
+    return jsonify({'success': True, 'controlfiles': controlfiles})
 
 
 @app.route('/api/storage/redolog/multiplex', methods=['POST'])
@@ -2049,9 +2126,41 @@ def api_storage_redolog_multiplex():
 @app.route('/api/storage/redolog/list')
 @login_required
 def api_storage_redolog_list():
-    """API: List redo log files"""
-    output = run_sqlplus("SELECT group#, member, type, status FROM v\\$logfile ORDER BY group#;")
-    return jsonify({'success': True, 'output': output})
+    """API: List redo log files with group info as structured JSON"""
+    sql = """SELECT f.group# AS "GROUP#", f.member AS "MEMBER", f.type AS "TYPE",
+       l.status AS "STATUS", ROUND(l.bytes/1024/1024) AS "SIZE_MB", l.members AS "MEMBERS"
+FROM v$logfile f JOIN v$log l ON f.group# = l.group#
+ORDER BY f.group#, f.member;"""
+    output = run_sqlplus(sql)
+    rows = parse_sql_rows(output)
+    redologs = []
+    for r in rows:
+        redologs.append({
+            'group': r.get('GROUP#', ''), 'member': r.get('MEMBER', ''),
+            'type': r.get('TYPE', ''), 'status': r.get('STATUS', ''),
+            'size_mb': r.get('SIZE_MB', ''), 'members': r.get('MEMBERS', '')
+        })
+    return jsonify({'success': True, 'redologs': redologs})
+
+
+@app.route('/api/storage/redolog/add', methods=['POST'])
+@login_required
+@admin_required
+def api_storage_redolog_add():
+    """API: Add a new redo log group"""
+    data = request.json or {}
+    size = data.get('size', '200M')
+    result = run_sqlplus(f"ALTER DATABASE ADD LOGFILE SIZE {size};")
+    return jsonify({'success': True, 'output': result})
+
+
+@app.route('/api/storage/tablespace/<name>/drop', methods=['POST'])
+@login_required
+@admin_required
+def api_storage_tablespace_drop(name):
+    """API: Drop tablespace"""
+    result = run_sqlplus(f"DROP TABLESPACE {name.upper()} INCLUDING CONTENTS AND DATAFILES;")
+    return jsonify({'success': True, 'output': result})
 
 
 # ============================================================================
@@ -2061,9 +2170,16 @@ def api_storage_redolog_list():
 @app.route('/api/protection/fra/status')
 @login_required
 def api_protection_fra_status():
-    """API: FRA (Fast Recovery Area) status"""
-    output = run_sqlplus("SELECT name, space_limit/1024/1024 AS size_mb, space_used/1024/1024 AS used_mb FROM v\\$recovery_file_dest;")
-    return jsonify({'success': True, 'output': output})
+    """API: FRA (Fast Recovery Area) status as structured JSON"""
+    output = run_sqlplus("SELECT name AS \"NAME\", ROUND(space_limit/1024/1024) AS \"SIZE_MB\", ROUND(space_used/1024/1024) AS \"USED_MB\" FROM v$recovery_file_dest;")
+    rows = parse_sql_rows(output)
+    if rows:
+        try:
+            return jsonify({'success': True, 'configured': True, 'name': rows[0].get('NAME', ''),
+                            'size_mb': float(rows[0].get('SIZE_MB', 0)), 'used_mb': float(rows[0].get('USED_MB', 0))})
+        except (ValueError, TypeError):
+            return jsonify({'success': True, 'configured': True, 'name': rows[0].get('NAME', ''), 'size_mb': 0, 'used_mb': 0})
+    return jsonify({'success': True, 'configured': False, 'name': '', 'size_mb': 0, 'used_mb': 0})
 
 
 @app.route('/api/protection/fra/enable', methods=['POST'])
@@ -2082,9 +2198,12 @@ ALTER SYSTEM SET db_recovery_file_dest = '/u01/app/oracle/fast_recovery_area' SC
 @app.route('/api/protection/flashback/status')
 @login_required
 def api_protection_flashback_status():
-    """API: Flashback Database status"""
-    output = run_sqlplus("SELECT flashback_on, log_mode FROM v\\$database;")
-    return jsonify({'success': True, 'output': output})
+    """API: Flashback Database status as structured JSON"""
+    output = run_sqlplus("SELECT flashback_on AS \"FLASHBACK_ON\", log_mode AS \"LOG_MODE\" FROM v$database;")
+    rows = parse_sql_rows(output)
+    flashback_on = rows[0].get('FLASHBACK_ON', 'NO') if rows else 'NO'
+    log_mode = rows[0].get('LOG_MODE', 'UNKNOWN') if rows else 'UNKNOWN'
+    return jsonify({'success': True, 'flashback_on': flashback_on, 'log_mode': log_mode})
 
 
 @app.route('/api/protection/flashback/enable', methods=['POST'])
@@ -2234,16 +2353,23 @@ AUDIT REVOKE;
 @app.route('/api/security/audit/view')
 @login_required
 def api_security_audit_view():
-    """API: View audit records"""
-    sql = """
-SELECT username, action_name, timestamp, returncode
-FROM dba_audit_trail
-WHERE timestamp > SYSDATE - 7
-ORDER BY timestamp DESC
-FETCH FIRST 50 ROWS ONLY;
-"""
+    """API: View audit records as structured JSON"""
+    sql = """SELECT username AS "USERNAME", action_name AS "ACTION_NAME",
+       TO_CHAR(timestamp, 'YYYY-MM-DD HH24:MI:SS') AS "TIMESTAMP",
+       returncode AS "RETURNCODE"
+FROM dba_audit_trail WHERE timestamp > SYSDATE - 7
+ORDER BY timestamp DESC FETCH FIRST 50 ROWS ONLY;"""
     output = run_sqlplus(sql)
-    return jsonify({'success': True, 'output': output})
+    rows = parse_sql_rows(output)
+    records = []
+    for row in rows:
+        records.append({
+            'username': row.get('USERNAME', ''),
+            'action_name': row.get('ACTION_NAME', ''),
+            'timestamp': row.get('TIMESTAMP', ''),
+            'returncode': row.get('RETURNCODE', '')
+        })
+    return jsonify({'success': True, 'records': records})
 
 
 # ============================================================================
