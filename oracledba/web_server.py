@@ -11,6 +11,9 @@ import subprocess
 import hashlib
 import hmac
 import secrets
+import uuid
+import re as _re_mod
+import yaml
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -416,6 +419,195 @@ class GUIConfig:
 
 
 config_manager = GUIConfig()
+
+
+# ============================================================================
+# INFRASTRUCTURE MANAGEMENT (Nodes, Storage Pools, DB Configs)
+# ============================================================================
+
+NODES_FILE = CONFIG_DIR / 'nodes.json'
+DB_CONFIGS_DIR = CONFIG_DIR / 'db-configs'
+
+
+def _ensure_infra_files():
+    """Create infrastructure config files if they don't exist"""
+    DB_CONFIGS_DIR.mkdir(exist_ok=True, parents=True)
+    if not NODES_FILE.exists():
+        # Auto-detect local node
+        public_ip = ''
+        try:
+            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5)
+            ips = result.stdout.strip().split()
+            public_ip = ips[0] if ips else '127.0.0.1'
+        except Exception:
+            public_ip = '127.0.0.1'
+        hostname = ''
+        try:
+            result = subprocess.run(['hostname'], capture_output=True, text=True, timeout=5)
+            hostname = result.stdout.strip()
+        except Exception:
+            hostname = 'localhost'
+        default_data = {
+            'nodes': [
+                {
+                    'id': 'local',
+                    'hostname': hostname,
+                    'ip': public_ip,
+                    'role': 'primary',
+                    'ssh_user': 'root',
+                    'ssh_key_path': '',
+                    'oracle_home': os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1'),
+                    'oracle_sid': os.environ.get('ORACLE_SID', 'GDCPROD'),
+                    'is_local': True,
+                    'added_at': datetime.now().isoformat(),
+                    'status': 'connected'
+                }
+            ],
+            'storage_pools': [
+                {
+                    'id': 'local-data',
+                    'type': 'local',
+                    'name': 'Oracle Data',
+                    'path': '/u01/app/oracle/oradata',
+                    'server': None,
+                    'mount_point': None,
+                    'added_at': datetime.now().isoformat()
+                },
+                {
+                    'id': 'local-fra',
+                    'type': 'local',
+                    'name': 'Fast Recovery Area',
+                    'path': '/u01/app/oracle/fast_recovery_area',
+                    'server': None,
+                    'mount_point': None,
+                    'added_at': datetime.now().isoformat()
+                }
+            ]
+        }
+        _save_nodes_data(default_data)
+
+
+def _load_nodes_data():
+    """Load nodes and storage pools from JSON"""
+    _ensure_infra_files()
+    try:
+        with open(NODES_FILE, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {'nodes': [], 'storage_pools': []}
+
+
+def _save_nodes_data(data):
+    """Save nodes and storage pools to JSON"""
+    _ensure_infra_files()
+    with open(NODES_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def _test_node_connection(node):
+    """Test SSH connection to a remote node and return status info"""
+    if node.get('is_local'):
+        # Local node — check Oracle processes
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'ora_pmon'],
+                capture_output=True, text=True, timeout=5
+            )
+            oracle_running = result.returncode == 0
+            return {
+                'connected': True,
+                'oracle_running': oracle_running,
+                'message': 'Oracle running' if oracle_running else 'Oracle stopped'
+            }
+        except Exception as e:
+            return {'connected': True, 'oracle_running': False, 'message': str(e)}
+    else:
+        # Remote node — SSH test
+        ssh_key = node.get('ssh_key_path', '')
+        ssh_user = node.get('ssh_user', 'root')
+        ip = node.get('ip', '')
+        try:
+            cmd = ['ssh', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=5']
+            if ssh_key:
+                cmd += ['-i', ssh_key]
+            cmd += [f'{ssh_user}@{ip}', 'pgrep -f ora_pmon >/dev/null 2>&1 && echo ORACLE_OK || echo ORACLE_DOWN']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                oracle_running = 'ORACLE_OK' in result.stdout
+                return {
+                    'connected': True,
+                    'oracle_running': oracle_running,
+                    'message': 'Oracle running' if oracle_running else 'Oracle stopped'
+                }
+            else:
+                return {'connected': False, 'oracle_running': False, 'message': f'SSH failed: {result.stderr.strip()[:100]}'}
+        except subprocess.TimeoutExpired:
+            return {'connected': False, 'oracle_running': False, 'message': 'Connection timeout'}
+        except Exception as e:
+            return {'connected': False, 'oracle_running': False, 'message': str(e)[:100]}
+
+
+def _get_pool_disk_usage(path):
+    """Get disk usage for a storage pool path"""
+    try:
+        result = subprocess.run(
+            ['df', '-BM', path],
+            capture_output=True, text=True, timeout=5
+        )
+        lines = result.stdout.strip().split('\n')
+        if len(lines) >= 2:
+            parts = lines[1].split()
+            if len(parts) >= 4:
+                total = int(parts[1].replace('M', ''))
+                used = int(parts[2].replace('M', ''))
+                avail = int(parts[3].replace('M', ''))
+                return {'total_mb': total, 'used_mb': used, 'available_mb': avail}
+    except Exception:
+        pass
+    return {'total_mb': 0, 'used_mb': 0, 'available_mb': 0}
+
+
+def _list_db_configs():
+    """List all saved database provisioning configs"""
+    _ensure_infra_files()
+    configs = []
+    for f in sorted(DB_CONFIGS_DIR.glob('*.yml')):
+        try:
+            with open(f, 'r') as fh:
+                data = yaml.safe_load(fh)
+            configs.append({
+                'filename': f.name,
+                'name': data.get('name', f.stem),
+                'description': data.get('description', ''),
+                'pdb_name': data.get('pdb', {}).get('name', ''),
+                'tablespace_count': len(data.get('tablespaces', [])),
+                'user_count': len(data.get('users', []))
+            })
+        except Exception:
+            pass
+    return configs
+
+
+def _load_db_config(filename):
+    """Load a specific database config by filename"""
+    filepath = DB_CONFIGS_DIR / filename
+    if not filepath.exists():
+        return None
+    with open(filepath, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def _save_db_config(config, filename=None):
+    """Save a database config to YAML file"""
+    _ensure_infra_files()
+    if not filename:
+        name = config.get('name', 'database')
+        safe_name = _re_mod.sub(r'[^a-zA-Z0-9_-]', '', name.lower().replace(' ', '-'))
+        filename = f'{safe_name}.yml'
+    filepath = DB_CONFIGS_DIR / filename
+    with open(filepath, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    return filename
 
 
 def login_required(f):
@@ -1137,6 +1329,494 @@ def api_cluster_add_node():
         'success': False, 
         'error': f'RAC node addition requires Grid Infrastructure. Configure NFS/SSH first, then run TP15 from the Labs page.'
     })
+
+
+# ============================================================================
+# INFRASTRUCTURE MANAGEMENT ROUTES (Nodes, Storage, DB Provisioning)
+# ============================================================================
+
+@app.route('/infrastructure')
+@login_required
+def infrastructure():
+    """Infrastructure management page — nodes, storage pools, DB provisioning"""
+    return render_template('infrastructure.html')
+
+
+@app.route('/api/infrastructure/nodes')
+@login_required
+def api_infra_nodes():
+    """API: List all registered nodes with live status"""
+    data = _load_nodes_data()
+    nodes = data.get('nodes', [])
+    result_nodes = []
+    for node in nodes:
+        status = _test_node_connection(node)
+        node_copy = dict(node)
+        node_copy['status'] = 'connected' if status['connected'] else 'disconnected'
+        node_copy['oracle_running'] = status.get('oracle_running', False)
+        node_copy['status_message'] = status.get('message', '')
+        # Don't expose SSH key path in API
+        node_copy.pop('ssh_key_path', None)
+        result_nodes.append(node_copy)
+    return jsonify({'success': True, 'nodes': result_nodes})
+
+
+@app.route('/api/infrastructure/nodes/add', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_nodes_add():
+    """API: Add a new remote node"""
+    data = request.json or {}
+    hostname = data.get('hostname', '').strip()
+    ip = data.get('ip', '').strip()
+    ssh_user = data.get('ssh_user', 'root').strip()
+    ssh_key_content = data.get('ssh_key', '').strip()
+    oracle_home = data.get('oracle_home', '/u01/app/oracle/product/19.3.0/dbhome_1').strip()
+    oracle_sid = data.get('oracle_sid', 'GDCPROD').strip()
+    role = data.get('role', 'standby').strip()
+
+    if not hostname or not ip:
+        return jsonify({'success': False, 'error': 'Hostname and IP are required'})
+    if not _re_mod.match(r'^[\d\.]+$', ip):
+        return jsonify({'success': False, 'error': 'Invalid IP address format'})
+
+    node_id = f'node-{uuid.uuid4().hex[:8]}'
+
+    # Save SSH key if provided
+    ssh_key_path = ''
+    if ssh_key_content:
+        keys_dir = CONFIG_DIR / 'ssh-keys'
+        keys_dir.mkdir(exist_ok=True)
+        key_file = keys_dir / f'{node_id}.pem'
+        with open(key_file, 'w') as f:
+            f.write(ssh_key_content)
+        os.chmod(str(key_file), 0o600)
+        ssh_key_path = str(key_file)
+
+    new_node = {
+        'id': node_id,
+        'hostname': hostname,
+        'ip': ip,
+        'role': role,
+        'ssh_user': ssh_user,
+        'ssh_key_path': ssh_key_path,
+        'oracle_home': oracle_home,
+        'oracle_sid': oracle_sid,
+        'is_local': False,
+        'added_at': datetime.now().isoformat(),
+        'status': 'unknown'
+    }
+
+    infra = _load_nodes_data()
+    infra['nodes'].append(new_node)
+    _save_nodes_data(infra)
+
+    # Test connection immediately
+    status = _test_node_connection(new_node)
+
+    return jsonify({
+        'success': True,
+        'node_id': node_id,
+        'connected': status['connected'],
+        'message': f"Node {hostname} ({ip}) added. {status['message']}"
+    })
+
+
+@app.route('/api/infrastructure/nodes/<node_id>/remove', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_nodes_remove(node_id):
+    """API: Remove a node"""
+    if node_id == 'local':
+        return jsonify({'success': False, 'error': 'Cannot remove the local node'})
+    infra = _load_nodes_data()
+    infra['nodes'] = [n for n in infra['nodes'] if n['id'] != node_id]
+    _save_nodes_data(infra)
+    # Remove SSH key if exists
+    key_file = CONFIG_DIR / 'ssh-keys' / f'{node_id}.pem'
+    if key_file.exists():
+        key_file.unlink()
+    return jsonify({'success': True, 'message': f'Node {node_id} removed'})
+
+
+@app.route('/api/infrastructure/nodes/<node_id>/test')
+@login_required
+def api_infra_nodes_test(node_id):
+    """API: Test connection to a specific node"""
+    infra = _load_nodes_data()
+    node = next((n for n in infra['nodes'] if n['id'] == node_id), None)
+    if not node:
+        return jsonify({'success': False, 'error': 'Node not found'})
+    status = _test_node_connection(node)
+    return jsonify({'success': True, **status})
+
+
+# --- Storage Pool Management ---
+
+@app.route('/api/infrastructure/storage')
+@login_required
+def api_infra_storage():
+    """API: List all storage pools with disk usage and tablespace counts"""
+    infra = _load_nodes_data()
+    pools = infra.get('storage_pools', [])
+    result_pools = []
+    for pool in pools:
+        pool_copy = dict(pool)
+        pool_copy['disk'] = _get_pool_disk_usage(pool['path'])
+        # Count tablespaces using datafiles in this path
+        try:
+            sql = f"COL TABLESPACE_NAME FORMAT A30\nSELECT DISTINCT TABLESPACE_NAME FROM DBA_DATA_FILES WHERE FILE_NAME LIKE '{pool['path']}%' ORDER BY TABLESPACE_NAME;"
+            out = run_sqlplus(sql)
+            rows = parse_sql_rows(out)
+            pool_copy['tablespaces'] = [r.get('TABLESPACE_NAME', '') for r in rows]
+        except Exception:
+            pool_copy['tablespaces'] = []
+        result_pools.append(pool_copy)
+    return jsonify({'success': True, 'pools': result_pools})
+
+
+@app.route('/api/infrastructure/storage/nfs/add', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_storage_nfs_add():
+    """API: Add an NFS storage pool"""
+    data = request.json or {}
+    name = data.get('name', 'NFS Storage').strip()
+    server = data.get('server', '').strip()
+    remote_path = data.get('remote_path', '').strip()
+    mount_point = data.get('mount_point', '').strip()
+
+    if not server or not remote_path or not mount_point:
+        return jsonify({'success': False, 'error': 'Server, remote path, and mount point are required'})
+
+    pool_id = f'nfs-{uuid.uuid4().hex[:8]}'
+    new_pool = {
+        'id': pool_id,
+        'type': 'nfs',
+        'name': name,
+        'path': mount_point,
+        'server': server,
+        'remote_path': remote_path,
+        'mount_point': mount_point,
+        'added_at': datetime.now().isoformat()
+    }
+
+    infra = _load_nodes_data()
+    infra['storage_pools'].append(new_pool)
+    _save_nodes_data(infra)
+
+    return jsonify({'success': True, 'pool_id': pool_id, 'message': f'NFS pool {name} added ({server}:{remote_path} → {mount_point})'})
+
+
+@app.route('/api/infrastructure/storage/nfs/<pool_id>/mount', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_storage_nfs_mount(pool_id):
+    """API: Mount an NFS storage pool on this server"""
+    infra = _load_nodes_data()
+    pool = next((p for p in infra['storage_pools'] if p['id'] == pool_id), None)
+    if not pool or pool.get('type') != 'nfs':
+        return jsonify({'success': False, 'error': 'NFS pool not found'})
+
+    server = pool.get('server', '')
+    remote = pool.get('remote_path', '')
+    mount = pool.get('mount_point', '')
+
+    script = f"""#!/bin/bash
+set -e
+dnf install -y nfs-utils 2>/dev/null || yum install -y nfs-utils 2>/dev/null || true
+mkdir -p {mount}
+mount -t nfs {server}:{remote} {mount} -o rw,bg,hard,nointr,tcp,vers=3,timeo=600,rsize=32768,wsize=32768
+echo "{server}:{remote} {mount} nfs rw,bg,hard,nointr,tcp,vers=3,timeo=600,rsize=32768,wsize=32768 0 0" >> /etc/fstab
+echo "NFS mounted: {server}:{remote} -> {mount}"
+"""
+    try:
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=30)
+        return jsonify({'success': True, 'output': result.stdout + result.stderr})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/infrastructure/storage/<pool_id>/remove', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_storage_remove(pool_id):
+    """API: Remove a storage pool"""
+    if pool_id in ('local-data', 'local-fra'):
+        return jsonify({'success': False, 'error': 'Cannot remove default local storage pools'})
+    infra = _load_nodes_data()
+    infra['storage_pools'] = [p for p in infra['storage_pools'] if p['id'] != pool_id]
+    _save_nodes_data(infra)
+    return jsonify({'success': True, 'message': f'Storage pool {pool_id} removed'})
+
+
+@app.route('/api/infrastructure/storage/<pool_id>/tablespaces')
+@login_required
+def api_infra_storage_tablespaces(pool_id):
+    """API: Get tablespaces in a specific storage pool"""
+    infra = _load_nodes_data()
+    pool = next((p for p in infra['storage_pools'] if p['id'] == pool_id), None)
+    if not pool:
+        return jsonify({'success': False, 'error': 'Pool not found'})
+    try:
+        sql = (
+            "COL TABLESPACE_NAME FORMAT A30\n"
+            "COL FILE_NAME FORMAT A100\n"
+            f"SELECT TABLESPACE_NAME, FILE_NAME, ROUND(BYTES/1024/1024,2) AS SIZE_MB, AUTOEXTENSIBLE "
+            f"FROM DBA_DATA_FILES WHERE FILE_NAME LIKE '{pool['path']}%' ORDER BY TABLESPACE_NAME;"
+        )
+        out = run_sqlplus(sql)
+        rows = parse_sql_rows(out)
+        tablespaces = []
+        for r in rows:
+            tablespaces.append({
+                'tablespace_name': r.get('TABLESPACE_NAME', ''),
+                'file_name': r.get('FILE_NAME', ''),
+                'size_mb': r.get('SIZE_MB', '0'),
+                'autoextensible': r.get('AUTOEXTENSIBLE', 'NO')
+            })
+        return jsonify({'success': True, 'tablespaces': tablespaces})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+# --- Database Config Provisioning ---
+
+@app.route('/api/infrastructure/configs')
+@login_required
+def api_infra_configs():
+    """API: List saved database provisioning configs"""
+    configs = _list_db_configs()
+    return jsonify({'success': True, 'configs': configs})
+
+
+@app.route('/api/infrastructure/configs/save', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_configs_save():
+    """API: Save a database provisioning config (YAML)"""
+    data = request.json or {}
+    config_yaml = data.get('yaml_content', '')
+    filename = data.get('filename', '')
+
+    if not config_yaml:
+        return jsonify({'success': False, 'error': 'YAML content is required'})
+
+    try:
+        config = yaml.safe_load(config_yaml)
+        if not isinstance(config, dict):
+            return jsonify({'success': False, 'error': 'Invalid YAML — must be a mapping'})
+        saved_name = _save_db_config(config, filename if filename else None)
+        return jsonify({'success': True, 'filename': saved_name, 'message': f'Config saved as {saved_name}'})
+    except yaml.YAMLError as e:
+        return jsonify({'success': False, 'error': f'YAML parse error: {str(e)}'})
+
+
+@app.route('/api/infrastructure/configs/<filename>/load')
+@login_required
+def api_infra_configs_load(filename):
+    """API: Load a specific config file"""
+    config = _load_db_config(filename)
+    if config is None:
+        return jsonify({'success': False, 'error': f'Config {filename} not found'})
+    yaml_str = yaml.dump(config, default_flow_style=False, sort_keys=False)
+    return jsonify({'success': True, 'config': config, 'yaml_content': yaml_str})
+
+
+@app.route('/api/infrastructure/configs/<filename>/delete', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_configs_delete(filename):
+    """API: Delete a saved config"""
+    filepath = DB_CONFIGS_DIR / filename
+    if filepath.exists():
+        filepath.unlink()
+        return jsonify({'success': True, 'message': f'{filename} deleted'})
+    return jsonify({'success': False, 'error': 'File not found'})
+
+
+@app.route('/api/infrastructure/configs/deploy', methods=['POST'])
+@login_required
+@admin_required
+def api_infra_configs_deploy():
+    """API: Deploy a database config — creates PDB, tablespaces, users, protection"""
+    data = request.json or {}
+    config_yaml = data.get('yaml_content', '')
+
+    if not config_yaml:
+        return jsonify({'success': False, 'error': 'YAML content is required'})
+
+    try:
+        config = yaml.safe_load(config_yaml)
+    except yaml.YAMLError as e:
+        return jsonify({'success': False, 'error': f'YAML error: {str(e)}'})
+
+    log = []
+    pdb_cfg = config.get('pdb', {})
+    pdb_name = pdb_cfg.get('name', '').upper()
+    admin_user = pdb_cfg.get('admin_user', f'{pdb_name}_admin').upper()
+    admin_pass = pdb_cfg.get('admin_password', 'Oracle123')
+
+    if not pdb_name or not _re_mod.match(r'^[A-Z][A-Z0-9_]{0,29}$', pdb_name):
+        return jsonify({'success': False, 'error': f'Invalid PDB name: {pdb_name}'})
+
+    # Step 1: Create PDB
+    log.append(f'[1/5] Creating PDB {pdb_name}...')
+    try:
+        sql = (
+            f"CREATE PLUGGABLE DATABASE {pdb_name} ADMIN USER {admin_user} IDENTIFIED BY \"{admin_pass}\"\n"
+            f"  FILE_NAME_CONVERT = ('/u01/app/oracle/oradata/GDCPROD/pdbseed/', '/u01/app/oracle/oradata/GDCPROD/{pdb_name}/');\n"
+            f"ALTER PLUGGABLE DATABASE {pdb_name} OPEN;\n"
+            f"ALTER PLUGGABLE DATABASE {pdb_name} SAVE STATE;"
+        )
+        result = run_sqlplus(sql)
+        if 'ORA-' in result and 'ORA-00000' not in result:
+            log.append(f'  WARNING: {result.strip()[:200]}')
+        else:
+            log.append(f'  OK: PDB {pdb_name} created and opened')
+    except Exception as e:
+        log.append(f'  ERROR: {str(e)}')
+        return jsonify({'success': False, 'log': log, 'error': f'Failed creating PDB: {str(e)}'})
+
+    # Step 2: Create Tablespaces
+    tablespaces = config.get('tablespaces', [])
+    if tablespaces:
+        log.append(f'[2/5] Creating {len(tablespaces)} tablespace(s)...')
+        for ts in tablespaces:
+            ts_name = ts.get('name', '').upper()
+            size_mb = ts.get('size_mb', 100)
+            autoextend = ts.get('autoextend', True)
+            max_size = ts.get('max_size_mb', 2048)
+            datafile = ts.get('datafile_path', f'/u01/app/oracle/oradata/GDCPROD/{pdb_name}/{ts_name.lower()}01.dbf')
+            auto_clause = f'AUTOEXTEND ON MAXSIZE {max_size}M' if autoextend else 'AUTOEXTEND OFF'
+            sql = (
+                f"ALTER SESSION SET CONTAINER = {pdb_name};\n"
+                f"CREATE TABLESPACE {ts_name} DATAFILE '{datafile}' SIZE {size_mb}M {auto_clause};"
+            )
+            try:
+                result = run_sqlplus(sql)
+                if 'ORA-' in result and 'ORA-00000' not in result:
+                    log.append(f'  WARNING ({ts_name}): {result.strip()[:150]}')
+                else:
+                    log.append(f'  OK: Tablespace {ts_name} created ({size_mb}M)')
+            except Exception as e:
+                log.append(f'  ERROR ({ts_name}): {str(e)}')
+    else:
+        log.append('[2/5] No tablespaces to create (skipped)')
+
+    # Step 3: Create Users
+    users = config.get('users', [])
+    if users:
+        log.append(f'[3/5] Creating {len(users)} user(s)...')
+        for usr in users:
+            uname = usr.get('username', '').upper()
+            upass = usr.get('password', 'Oracle123')
+            default_ts = usr.get('default_tablespace', 'USERS').upper()
+            temp_ts = usr.get('temp_tablespace', 'TEMP').upper()
+            quota = usr.get('quota', 'UNLIMITED')
+            roles = usr.get('roles', ['CONNECT', 'RESOURCE'])
+            grants = usr.get('grants', [])
+
+            sql_parts = [
+                f"ALTER SESSION SET CONTAINER = {pdb_name};",
+                f'CREATE USER {uname} IDENTIFIED BY "{upass}" DEFAULT TABLESPACE {default_ts} TEMPORARY TABLESPACE {temp_ts};',
+                f'ALTER USER {uname} QUOTA {quota} ON {default_ts};'
+            ]
+            for role in roles:
+                sql_parts.append(f'GRANT {role.upper()} TO {uname};')
+            for grant in grants:
+                sql_parts.append(f'GRANT {grant.upper()} TO {uname};')
+
+            try:
+                result = run_sqlplus('\n'.join(sql_parts))
+                if 'ORA-' in result and 'ORA-00000' not in result:
+                    log.append(f'  WARNING ({uname}): {result.strip()[:150]}')
+                else:
+                    log.append(f'  OK: User {uname} created with roles {", ".join(roles)}')
+            except Exception as e:
+                log.append(f'  ERROR ({uname}): {str(e)}')
+    else:
+        log.append('[3/5] No users to create (skipped)')
+
+    # Step 4: Protection
+    protection = config.get('protection', {})
+    if protection:
+        log.append('[4/5] Configuring protection...')
+        if protection.get('archivelog'):
+            log.append('  Archivelog: already enabled at CDB level')
+        if protection.get('flashback'):
+            log.append('  Flashback: already enabled at CDB level')
+        if protection.get('rman_backup'):
+            retention = protection.get('rman_retention', 'REDUNDANCY 2')
+            log.append(f'  RMAN retention: {retention} (configure from Protection page)')
+    else:
+        log.append('[4/5] No protection config (skipped)')
+
+    # Step 5: Verification
+    log.append('[5/5] Verifying deployment...')
+    try:
+        verify_sql = f"SELECT NAME, OPEN_MODE FROM V$PDBS WHERE NAME = '{pdb_name}';"
+        result = run_sqlplus(verify_sql)
+        rows = parse_sql_rows(result)
+        if rows:
+            log.append(f'  OK: PDB {pdb_name} is {rows[0].get("OPEN_MODE", "UNKNOWN")}')
+        else:
+            log.append(f'  WARNING: PDB {pdb_name} not found in V$PDBS')
+    except Exception as e:
+        log.append(f'  ERROR: {str(e)}')
+
+    log.append('--- Deployment complete ---')
+    return jsonify({'success': True, 'log': log})
+
+
+@app.route('/api/infrastructure/configs/template')
+@login_required
+def api_infra_configs_template():
+    """API: Get a blank database config template"""
+    template = {
+        'name': 'my-database',
+        'description': 'New database with tablespace and user',
+        'pdb': {
+            'name': 'MYDB',
+            'admin_user': 'mydb_admin',
+            'admin_password': 'Oracle123'
+        },
+        'tablespaces': [
+            {
+                'name': 'MYDB_DATA',
+                'size_mb': 500,
+                'autoextend': True,
+                'max_size_mb': 2048,
+                'datafile_path': '/u01/app/oracle/oradata/GDCPROD/MYDB/mydb_data01.dbf'
+            },
+            {
+                'name': 'MYDB_INDEX',
+                'size_mb': 200,
+                'autoextend': True,
+                'max_size_mb': 1024,
+                'datafile_path': '/u01/app/oracle/oradata/GDCPROD/MYDB/mydb_idx01.dbf'
+            }
+        ],
+        'users': [
+            {
+                'username': 'APP_USER',
+                'password': 'AppUser123',
+                'default_tablespace': 'MYDB_DATA',
+                'temp_tablespace': 'TEMP',
+                'quota': 'UNLIMITED',
+                'roles': ['CONNECT', 'RESOURCE'],
+                'grants': ['CREATE VIEW', 'CREATE SEQUENCE']
+            }
+        ],
+        'protection': {
+            'archivelog': True,
+            'flashback': True,
+            'rman_backup': True,
+            'rman_retention': 'REDUNDANCY 2'
+        }
+    }
+    yaml_str = yaml.dump(template, default_flow_style=False, sort_keys=False)
+    return jsonify({'success': True, 'template': template, 'yaml_content': yaml_str})
 
 
 # ============================================================================

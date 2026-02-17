@@ -1,0 +1,39 @@
+# Development Database Configuration
+# Lightweight PDB for development/testing
+
+name: dev-database
+description: Development environment with minimal resources
+
+pdb:
+  name: DEVDB
+  admin_user: devdb_admin
+  admin_password: DevAdmin123
+
+tablespaces:
+  - name: DEV_DATA
+    size_mb: 200
+    autoextend: true
+    max_size_mb: 1024
+    datafile_path: /u01/app/oracle/oradata/GDCPROD/DEVDB/dev_data01.dbf
+
+users:
+  - username: DEV_USER
+    password: DevUser123
+    default_tablespace: DEV_DATA
+    temp_tablespace: TEMP
+    quota: UNLIMITED
+    roles:
+      - CONNECT
+      - RESOURCE
+      - DBA
+    grants:
+      - CREATE VIEW
+      - CREATE SEQUENCE
+      - CREATE SYNONYM
+      - CREATE PROCEDURE
+      - CREATE TRIGGER
+
+protection:
+  archivelog: true
+  flashback: true
+  rman_backup: false

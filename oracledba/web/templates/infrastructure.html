@@ -1,0 +1,742 @@
+{% extends "base.html" %}
+
+{% block title %}Infrastructure - OracleDBA{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stat-card {
+        text-align: center;
+        padding: 20px 15px;
+        border-radius: 10px;
+        background: white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .stat-card .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 2px;
+    }
+    .stat-card .stat-label {
+        font-size: 0.85rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .node-card {
+        border-left: 4px solid #28a745;
+        transition: transform 0.15s;
+    }
+    .node-card:hover { transform: translateY(-2px); }
+    .node-card.disconnected { border-left-color: #dc3545; }
+    .node-card.unknown { border-left-color: #6c757d; }
+    .node-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+    .node-badge.connected { background: #d4edda; color: #155724; }
+    .node-badge.disconnected { background: #f8d7da; color: #721c24; }
+    .node-badge.oracle-up { background: #cce5ff; color: #004085; }
+    .node-badge.oracle-down { background: #fff3cd; color: #856404; }
+    .pool-card {
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 15px;
+    }
+    .pool-header {
+        padding: 15px 20px;
+        background: #f8f9fa;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+    }
+    .pool-header:hover { background: #eef1f5; }
+    .pool-body {
+        padding: 15px 20px;
+        display: none;
+        border-top: 1px solid #e0e0e0;
+    }
+    .pool-body.show { display: block; }
+    .disk-bar {
+        height: 8px;
+        border-radius: 4px;
+        background: #e9ecef;
+        overflow: hidden;
+        margin: 6px 0;
+    }
+    .disk-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.4s;
+    }
+    .yaml-editor {
+        width: 100%;
+        min-height: 350px;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        background: #1e1e2e;
+        color: #cdd6f4;
+        resize: vertical;
+        tab-size: 2;
+    }
+    .yaml-editor:focus {
+        border-color: #C74634;
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(199,70,52,0.15);
+    }
+    .config-card {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 12px 15px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: white;
+    }
+    .config-card:hover { background: #f8f9fa; }
+    .deploy-log {
+        background: #1e1e1e;
+        color: #39FF14;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        padding: 15px;
+        border-radius: 8px;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e9ecef;
+    }
+    .section-header h3 {
+        margin: 0;
+        font-weight: 600;
+    }
+    .type-badge {
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .type-badge.local { background: #e2e3f1; color: #3f3d56; }
+    .type-badge.nfs { background: #d1ecf1; color: #0c5460; }
+    .type-badge.primary { background: #d4edda; color: #155724; }
+    .type-badge.standby { background: #fff3cd; color: #856404; }
+    .ts-pill {
+        display: inline-block;
+        padding: 3px 10px;
+        margin: 2px 4px 2px 0;
+        border-radius: 15px;
+        font-size: 0.78rem;
+        background: #e9ecef;
+        color: #495057;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-network-wired text-primary"></i> Infrastructure</h1>
+            <p class="text-muted">Nodes, storage pools, NFS, and database provisioning — your complete Oracle platform</p>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="row mb-4" id="statsRow">
+        <div class="col-md-3"><div class="stat-card"><div class="stat-value text-primary" id="statNodes">-</div><div class="stat-label">Nodes</div></div></div>
+        <div class="col-md-3"><div class="stat-card"><div class="stat-value text-success" id="statConnected">-</div><div class="stat-label">Connected</div></div></div>
+        <div class="col-md-3"><div class="stat-card"><div class="stat-value text-info" id="statPools">-</div><div class="stat-label">Storage Pools</div></div></div>
+        <div class="col-md-3"><div class="stat-card"><div class="stat-value text-warning" id="statConfigs">-</div><div class="stat-label">Saved Configs</div></div></div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- SECTION 1: NODES -->
+    <!-- ================================================================== -->
+    <div class="section-header">
+        <h3><i class="fas fa-server"></i> Nodes</h3>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addNodeModal">
+            <i class="fas fa-plus"></i> Add Node
+        </button>
+    </div>
+
+    <div class="row mb-5" id="nodesContainer">
+        <div class="col-12 text-center text-muted py-4">
+            <i class="fas fa-spinner fa-spin"></i> Loading nodes...
+        </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- SECTION 2: STORAGE POOLS -->
+    <!-- ================================================================== -->
+    <div class="section-header">
+        <h3><i class="fas fa-hdd"></i> Storage Pools</h3>
+        <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addNFSModal">
+            <i class="fas fa-plus"></i> Add NFS
+        </button>
+    </div>
+
+    <div class="row mb-5">
+        <div class="col-12" id="poolsContainer">
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-spinner fa-spin"></i> Loading storage pools...
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- SECTION 3: DATABASE PROVISIONING (YAML) -->
+    <!-- ================================================================== -->
+    <div class="section-header">
+        <h3><i class="fas fa-magic"></i> Database Provisioning</h3>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadTemplate()">
+                <i class="fas fa-file-code"></i> Load Template
+            </button>
+            <button class="btn btn-outline-info btn-sm" onclick="loadConfigs()">
+                <i class="fas fa-folder-open"></i> Saved Configs
+            </button>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-code"></i> Database Config (YAML)</span>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-primary" onclick="saveConfig()">
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button class="btn btn-success" onclick="deployConfig()">
+                            <i class="fas fa-rocket"></i> Deploy
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <textarea class="yaml-editor" id="yamlEditor" spellcheck="false" placeholder="# Paste or write your database config YAML here...
+# Click 'Load Template' for an example."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <!-- Saved Configs List -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="fas fa-list"></i> Saved Configs
+                </div>
+                <div class="card-body" style="max-height: 180px; overflow-y: auto;" id="configsListContainer">
+                    <div class="text-center text-muted py-2"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Deploy Log -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-terminal"></i> Deploy Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('deployLog').textContent='Ready to deploy...'">
+                        <i class="fas fa-eraser"></i> Clear
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="deploy-log" id="deployLog">Ready to deploy...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- MODAL: Add Node -->
+<!-- ================================================================== -->
+<div class="modal fade" id="addNodeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus-circle"></i> Add Remote Node</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addNodeForm" onsubmit="addNode(event)">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Hostname</label>
+                            <input type="text" class="form-control" id="nodeHostname" placeholder="oracledb02" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">IP Address</label>
+                            <input type="text" class="form-control" id="nodeIp" placeholder="192.168.1.102" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">SSH User</label>
+                            <input type="text" class="form-control" id="nodeSshUser" value="root">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Role</label>
+                            <select class="form-select" id="nodeRole">
+                                <option value="standby">Standby (Data Guard)</option>
+                                <option value="rac-node">RAC Node</option>
+                                <option value="nfs-server">NFS Server</option>
+                                <option value="observer">Observer</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Oracle SID</label>
+                            <input type="text" class="form-control" id="nodeOracleSid" value="GDCPROD">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">ORACLE_HOME</label>
+                            <input type="text" class="form-control" id="nodeOracleHome" value="/u01/app/oracle/product/19.3.0/dbhome_1">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">SSH Private Key (paste content)</label>
+                            <textarea class="form-control" id="nodeSshKey" rows="3" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+                            <small class="text-muted">Optional. Stored securely in ~/.oracledba/ssh-keys/</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Add Node</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- MODAL: Add NFS -->
+<!-- ================================================================== -->
+<div class="modal fade" id="addNFSModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-folder-plus"></i> Add NFS Storage Pool</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addNFSForm" onsubmit="addNFS(event)">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Pool Name</label>
+                        <input type="text" class="form-control" id="nfsName" placeholder="Shared Oracle Storage" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">NFS Server IP</label>
+                        <input type="text" class="form-control" id="nfsServerIp" placeholder="192.168.1.100" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Remote Path</label>
+                        <input type="text" class="form-control" id="nfsRemotePath" value="/u01/shared" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Local Mount Point</label>
+                        <input type="text" class="form-control" id="nfsMountPoint" value="/mnt/nfs_oracle" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-plus"></i> Add NFS Pool</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadNodes();
+    loadPools();
+    loadConfigs();
+});
+
+// ============================================================================
+// NODES
+// ============================================================================
+async function loadNodes() {
+    const container = document.getElementById('nodesContainer');
+    container.innerHTML = '<div class="col-12 text-center text-muted py-4"><i class="fas fa-spinner fa-spin"></i> Loading nodes...</div>';
+
+    const result = await apiCall('/api/infrastructure/nodes');
+    if (!result.success) {
+        container.innerHTML = `<div class="col-12"><div class="alert alert-danger">${result.error}</div></div>`;
+        return;
+    }
+
+    const nodes = result.nodes || [];
+    document.getElementById('statNodes').textContent = nodes.length;
+    document.getElementById('statConnected').textContent = nodes.filter(n => n.status === 'connected').length;
+
+    if (nodes.length === 0) {
+        container.innerHTML = '<div class="col-12"><div class="alert alert-info">No nodes registered. Add one to get started.</div></div>';
+        return;
+    }
+
+    let html = '';
+    for (const node of nodes) {
+        const isConnected = node.status === 'connected';
+        const oracleUp = node.oracle_running;
+        const cardClass = isConnected ? '' : 'disconnected';
+        const roleLabel = node.role || 'node';
+        const roleBadgeClass = node.is_local ? 'primary' : 'standby';
+
+        html += `
+        <div class="col-md-6 col-lg-4 mb-3">
+            <div class="card node-card ${cardClass}">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h5 class="mb-0">${node.hostname || 'Unknown'}</h5>
+                            <small class="text-muted">${node.ip}</small>
+                        </div>
+                        <span class="type-badge ${roleBadgeClass}">${node.is_local ? 'LOCAL' : roleLabel.toUpperCase()}</span>
+                    </div>
+                    <div class="mb-2">
+                        <span class="node-badge ${isConnected ? 'connected' : 'disconnected'}">
+                            <i class="fas fa-circle" style="font-size:8px"></i> ${isConnected ? 'Connected' : 'Disconnected'}
+                        </span>
+                        <span class="node-badge ${oracleUp ? 'oracle-up' : 'oracle-down'}">
+                            <i class="fas fa-database" style="font-size:10px"></i> ${oracleUp ? 'Oracle Running' : 'Oracle Down'}
+                        </span>
+                    </div>
+                    <div class="small text-muted mb-2">
+                        <div><strong>SID:</strong> ${node.oracle_sid || 'N/A'}</div>
+                        <div><strong>Added:</strong> ${node.added_at ? new Date(node.added_at).toLocaleDateString() : 'N/A'}</div>
+                    </div>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-info flex-fill" onclick="testNode('${node.id}')">
+                            <i class="fas fa-plug"></i> Test
+                        </button>
+                        ${!node.is_local ? `<button class="btn btn-sm btn-outline-danger" onclick="removeNode('${node.id}', '${node.hostname}')"><i class="fas fa-trash"></i></button>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+async function addNode(event) {
+    event.preventDefault();
+    const data = {
+        hostname: document.getElementById('nodeHostname').value,
+        ip: document.getElementById('nodeIp').value,
+        ssh_user: document.getElementById('nodeSshUser').value,
+        role: document.getElementById('nodeRole').value,
+        oracle_sid: document.getElementById('nodeOracleSid').value,
+        oracle_home: document.getElementById('nodeOracleHome').value,
+        ssh_key: document.getElementById('nodeSshKey').value
+    };
+
+    const result = await apiCall('/api/infrastructure/nodes/add', 'POST', data);
+    if (result.success) {
+        bootstrap.Modal.getInstance(document.getElementById('addNodeModal')).hide();
+        document.getElementById('addNodeForm').reset();
+        loadNodes();
+        appendDeployLog(`Node ${data.hostname} (${data.ip}) added — ${result.connected ? 'Connected' : 'Connection failed'}`);
+    } else {
+        alert(result.error);
+    }
+}
+
+async function testNode(nodeId) {
+    const result = await apiCall(`/api/infrastructure/nodes/${nodeId}/test`);
+    if (result.success) {
+        const msg = result.connected
+            ? `✅ Node ${nodeId}: Connected — ${result.message}`
+            : `❌ Node ${nodeId}: ${result.message}`;
+        appendDeployLog(msg);
+        loadNodes();
+    } else {
+        appendDeployLog(`❌ Test failed for ${nodeId}: ${result.error}`);
+    }
+}
+
+async function removeNode(nodeId, hostname) {
+    if (!confirm(`Remove node ${hostname}? This will delete its SSH key.`)) return;
+    const result = await apiCall(`/api/infrastructure/nodes/${nodeId}/remove`, 'POST');
+    if (result.success) {
+        loadNodes();
+        appendDeployLog(`Node ${hostname} removed`);
+    } else {
+        alert(result.error);
+    }
+}
+
+// ============================================================================
+// STORAGE POOLS
+// ============================================================================
+async function loadPools() {
+    const container = document.getElementById('poolsContainer');
+    container.innerHTML = '<div class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+
+    const result = await apiCall('/api/infrastructure/storage');
+    if (!result.success) {
+        container.innerHTML = `<div class="alert alert-danger">${result.error}</div>`;
+        return;
+    }
+
+    const pools = result.pools || [];
+    document.getElementById('statPools').textContent = pools.length;
+
+    if (pools.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">No storage pools configured.</div>';
+        return;
+    }
+
+    let html = '';
+    for (const pool of pools) {
+        const disk = pool.disk || {};
+        const totalMB = disk.total_mb || 0;
+        const usedMB = disk.used_mb || 0;
+        const pctUsed = totalMB > 0 ? Math.round((usedMB / totalMB) * 100) : 0;
+        const barColor = pctUsed > 85 ? '#dc3545' : pctUsed > 70 ? '#ffc107' : '#28a745';
+        const isNFS = pool.type === 'nfs';
+        const tsList = pool.tablespaces || [];
+        const showCount = 2;
+        const extraCount = tsList.length - showCount;
+
+        html += `
+        <div class="pool-card">
+            <div class="pool-header" onclick="togglePool('${pool.id}')">
+                <div class="d-flex align-items-center gap-3">
+                    <i class="fas ${isNFS ? 'fa-cloud' : 'fa-hdd'} text-${isNFS ? 'info' : 'primary'}" style="font-size:1.3rem"></i>
+                    <div>
+                        <strong>${pool.name}</strong>
+                        <div class="small text-muted">${pool.path}${isNFS ? ` (${pool.server}:${pool.remote_path || ''})` : ''}</div>
+                    </div>
+                    <span class="type-badge ${pool.type}">${pool.type.toUpperCase()}</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <div style="min-width:200px">
+                        <div class="d-flex justify-content-between small">
+                            <span>${formatMB(usedMB)} / ${formatMB(totalMB)}</span>
+                            <span>${pctUsed}%</span>
+                        </div>
+                        <div class="disk-bar">
+                            <div class="disk-bar-fill" style="width:${pctUsed}%;background:${barColor}"></div>
+                        </div>
+                    </div>
+                    <div class="text-muted">
+                        <span class="badge bg-secondary">${tsList.length} TS</span>
+                    </div>
+                    <i class="fas fa-chevron-down text-muted pool-chevron" id="chevron-${pool.id}"></i>
+                </div>
+            </div>
+            <div class="pool-body" id="pool-${pool.id}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>Tablespaces</strong>
+                    ${isNFS ? `
+                    <div>
+                        <button class="btn btn-sm btn-outline-info" onclick="mountNFS('${pool.id}')"><i class="fas fa-link"></i> Mount</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="removePool('${pool.id}', '${pool.name}')"><i class="fas fa-trash"></i> Remove</button>
+                    </div>` : ''}
+                </div>
+                <div id="ts-${pool.id}">
+                    ${tsList.length === 0
+                        ? '<span class="text-muted small">No tablespaces on this path</span>'
+                        : tsList.slice(0, showCount).map(t => `<span class="ts-pill"><i class="fas fa-table"></i> ${t}</span>`).join('')
+                          + (extraCount > 0 ? `<button class="btn btn-sm btn-link p-0 ms-1" onclick="expandTS('${pool.id}')">+${extraCount} more</button>` : '')
+                    }
+                </div>
+                <div id="ts-full-${pool.id}" style="display:none">
+                    ${tsList.map(t => `<span class="ts-pill"><i class="fas fa-table"></i> ${t}</span>`).join('')}
+                </div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function togglePool(poolId) {
+    const body = document.getElementById('pool-' + poolId);
+    const chevron = document.getElementById('chevron-' + poolId);
+    body.classList.toggle('show');
+    chevron.style.transform = body.classList.contains('show') ? 'rotate(180deg)' : '';
+}
+
+function expandTS(poolId) {
+    document.getElementById('ts-' + poolId).style.display = 'none';
+    document.getElementById('ts-full-' + poolId).style.display = 'block';
+}
+
+function formatMB(mb) {
+    if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+    return mb + ' MB';
+}
+
+async function addNFS(event) {
+    event.preventDefault();
+    const data = {
+        name: document.getElementById('nfsName').value,
+        server: document.getElementById('nfsServerIp').value,
+        remote_path: document.getElementById('nfsRemotePath').value,
+        mount_point: document.getElementById('nfsMountPoint').value
+    };
+    const result = await apiCall('/api/infrastructure/storage/nfs/add', 'POST', data);
+    if (result.success) {
+        bootstrap.Modal.getInstance(document.getElementById('addNFSModal')).hide();
+        document.getElementById('addNFSForm').reset();
+        loadPools();
+        appendDeployLog(result.message);
+    } else {
+        alert(result.error);
+    }
+}
+
+async function mountNFS(poolId) {
+    appendDeployLog(`Mounting NFS pool ${poolId}...`);
+    const result = await apiCall(`/api/infrastructure/storage/nfs/${poolId}/mount`, 'POST');
+    if (result.success) {
+        appendDeployLog(`✅ NFS mounted successfully`);
+        if (result.output) appendDeployLog(result.output);
+        loadPools();
+    } else {
+        appendDeployLog(`❌ Mount failed: ${result.error}`);
+    }
+}
+
+async function removePool(poolId, name) {
+    if (!confirm(`Remove storage pool "${name}"?`)) return;
+    const result = await apiCall(`/api/infrastructure/storage/${poolId}/remove`, 'POST');
+    if (result.success) {
+        loadPools();
+        appendDeployLog(`Storage pool "${name}" removed`);
+    } else {
+        alert(result.error);
+    }
+}
+
+// ============================================================================
+// DATABASE PROVISIONING
+// ============================================================================
+async function loadTemplate() {
+    const result = await apiCall('/api/infrastructure/configs/template');
+    if (result.success) {
+        document.getElementById('yamlEditor').value = result.yaml_content;
+        appendDeployLog('Template loaded — customize and click Deploy');
+    }
+}
+
+async function loadConfigs() {
+    const container = document.getElementById('configsListContainer');
+    container.innerHTML = '<div class="text-center text-muted py-2"><i class="fas fa-spinner fa-spin"></i></div>';
+
+    const result = await apiCall('/api/infrastructure/configs');
+    if (!result.success) {
+        container.innerHTML = `<div class="alert alert-danger mb-0">${result.error}</div>`;
+        return;
+    }
+
+    const configs = result.configs || [];
+    document.getElementById('statConfigs').textContent = configs.length;
+
+    if (configs.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-2">No saved configs. Save one from the editor.</div>';
+        return;
+    }
+
+    let html = '';
+    for (const cfg of configs) {
+        html += `
+        <div class="config-card">
+            <div>
+                <strong>${cfg.name}</strong>
+                <div class="small text-muted">${cfg.description || cfg.filename} — PDB: ${cfg.pdb_name || 'N/A'}, ${cfg.tablespace_count} TS, ${cfg.user_count} users</div>
+            </div>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-primary" onclick="loadConfig('${cfg.filename}')"><i class="fas fa-upload"></i></button>
+                <button class="btn btn-outline-danger" onclick="deleteConfig('${cfg.filename}')"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+async function loadConfig(filename) {
+    const result = await apiCall(`/api/infrastructure/configs/${filename}/load`);
+    if (result.success) {
+        document.getElementById('yamlEditor').value = result.yaml_content;
+        appendDeployLog(`Config "${filename}" loaded into editor`);
+    } else {
+        alert(result.error);
+    }
+}
+
+async function saveConfig() {
+    const yaml = document.getElementById('yamlEditor').value.trim();
+    if (!yaml) { alert('Editor is empty'); return; }
+
+    const result = await apiCall('/api/infrastructure/configs/save', 'POST', { yaml_content: yaml });
+    if (result.success) {
+        appendDeployLog(`✅ Config saved as ${result.filename}`);
+        loadConfigs();
+    } else {
+        appendDeployLog(`❌ Save failed: ${result.error}`);
+    }
+}
+
+async function deleteConfig(filename) {
+    if (!confirm(`Delete config "${filename}"?`)) return;
+    const result = await apiCall(`/api/infrastructure/configs/${filename}/delete`, 'POST');
+    if (result.success) {
+        loadConfigs();
+        appendDeployLog(`Config "${filename}" deleted`);
+    } else {
+        alert(result.error);
+    }
+}
+
+async function deployConfig() {
+    const yaml = document.getElementById('yamlEditor').value.trim();
+    if (!yaml) { alert('Editor is empty'); return; }
+
+    if (!confirm('Deploy this config? This will create a PDB, tablespaces, and users on the live database.')) return;
+
+    const logEl = document.getElementById('deployLog');
+    logEl.textContent = 'Deploying...\n';
+
+    const result = await apiCall('/api/infrastructure/configs/deploy', 'POST', { yaml_content: yaml });
+    if (result.success) {
+        const log = result.log || [];
+        logEl.textContent = log.join('\n');
+    } else {
+        logEl.textContent = `ERROR: ${result.error}\n`;
+        if (result.log) logEl.textContent += result.log.join('\n');
+    }
+}
+
+// ============================================================================
+// UTILITY
+// ============================================================================
+function appendDeployLog(text) {
+    const log = document.getElementById('deployLog');
+    const ts = new Date().toLocaleTimeString();
+    log.textContent += `\n[${ts}] ${text}`;
+    log.scrollTop = log.scrollHeight;
+}
+</script>
+{% endblock %}

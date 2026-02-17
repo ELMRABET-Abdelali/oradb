@@ -1,0 +1,60 @@
+# Production Database Configuration
+# Deploy this to create a fully configured production PDB
+# with dedicated tablespaces, application user, and protection
+
+name: production-db
+description: Production database with dedicated storage and full protection
+
+pdb:
+  name: PRODDB
+  admin_user: proddb_admin
+  admin_password: ProdAdmin#2025
+
+tablespaces:
+  - name: PROD_DATA
+    size_mb: 1024
+    autoextend: true
+    max_size_mb: 4096
+    datafile_path: /u01/app/oracle/oradata/GDCPROD/PRODDB/prod_data01.dbf
+
+  - name: PROD_INDEX
+    size_mb: 512
+    autoextend: true
+    max_size_mb: 2048
+    datafile_path: /u01/app/oracle/oradata/GDCPROD/PRODDB/prod_idx01.dbf
+
+  - name: PROD_LOB
+    size_mb: 256
+    autoextend: true
+    max_size_mb: 2048
+    datafile_path: /u01/app/oracle/oradata/GDCPROD/PRODDB/prod_lob01.dbf
+
+users:
+  - username: APP_PROD
+    password: AppProd#2025
+    default_tablespace: PROD_DATA
+    temp_tablespace: TEMP
+    quota: UNLIMITED
+    roles:
+      - CONNECT
+      - RESOURCE
+    grants:
+      - CREATE VIEW
+      - CREATE SEQUENCE
+      - CREATE SYNONYM
+
+  - username: APP_READONLY
+    password: ReadOnly#2025
+    default_tablespace: PROD_DATA
+    temp_tablespace: TEMP
+    quota: 0M
+    roles:
+      - CONNECT
+    grants:
+      - CREATE SESSION
+
+protection:
+  archivelog: true
+  flashback: true
+  rman_backup: true
+  rman_retention: REDUNDANCY 2
