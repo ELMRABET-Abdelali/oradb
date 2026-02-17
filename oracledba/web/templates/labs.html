@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Labs - OracleDBA{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1><i class="fas fa-flask"></i> Oracle DBA Labs</h1>
+            <p class="text-muted">Run training practicals (TP01-TP15) to install and configure Oracle 19c features</p>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card border-success">
+                <div class="card-body text-center">
+                    <h5><i class="fas fa-rocket text-success"></i> Full Install</h5>
+                    <p class="small text-muted">Run TP01 + TP02 + TP03 for complete Oracle 19c installation</p>
+                    <button class="btn btn-success" onclick="runSequence('01', '03')">
+                        <i class="fas fa-play"></i> Run TP01-03
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-primary">
+                <div class="card-body text-center">
+                    <h5><i class="fas fa-cogs text-primary"></i> Post-Install Config</h5>
+                    <p class="small text-muted">Run TP04-TP09 for all post-installation configuration</p>
+                    <button class="btn btn-primary" onclick="runSequence('04', '09')">
+                        <i class="fas fa-play"></i> Run TP04-09
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card border-warning">
+                <div class="card-body text-center">
+                    <h5><i class="fas fa-star text-warning"></i> Advanced Features</h5>
+                    <p class="small text-muted">Run TP10-TP15 for tuning, multitenant, AI/ML, RAC</p>
+                    <button class="btn btn-warning" onclick="runSequence('10', '15')">
+                        <i class="fas fa-play"></i> Run TP10-15
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Labs Grid -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-list"></i> All Training Practicals</h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="loadLabs()">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="labs-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>TP#</th>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>Category</th>
+                                    <th>User</th>
+                                    <th>Duration</th>
+                                    <th>Script</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="labs-body">
+                                <tr><td colspan="8" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Output -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-terminal"></i> Lab Output
+                        <span id="running-indicator" class="badge bg-danger ms-2" style="display:none;">
+                            <i class="fas fa-spinner fa-spin"></i> Running
+                        </span>
+                    </h5>
+                    <div>
+                        <button class="btn btn-sm btn-outline-light me-2" onclick="clearLog()">
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                        <button class="btn btn-sm btn-outline-light" onclick="stopPolling()">
+                            <i class="fas fa-stop"></i> Stop Watching
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body bg-dark" style="max-height: 500px; overflow-y: auto;" id="log-container">
+                    <pre id="lab-log" class="text-light mb-0" style="font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap;">Select a lab above and click Run to see output here...</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.category-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.cat-installation { background: #d4edda; color: #155724; }
+.cat-configuration { background: #cce5ff; color: #004085; }
+.cat-security { background: #fff3cd; color: #856404; }
+.cat-protection { background: #d1ecf1; color: #0c5460; }
+.cat-ha { background: #f8d7da; color: #721c24; }
+.cat-performance { background: #e2e3e5; color: #383d41; }
+.cat-maintenance { background: #ffeeba; color: #856404; }
+.cat-architecture { background: #c3e6cb; color: #155724; }
+.cat-advanced { background: #d6d8db; color: #383d41; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let logPolling = null;
+let currentTP = null;
+
+function getCategoryClass(category) {
+    const map = {
+        'Installation': 'cat-installation',
+        'Configuration': 'cat-configuration',
+        'Security': 'cat-security',
+        'Protection': 'cat-protection',
+        'HA': 'cat-ha',
+        'Performance': 'cat-performance',
+        'Maintenance': 'cat-maintenance',
+        'Architecture': 'cat-architecture',
+        'Advanced': 'cat-advanced'
+    };
+    return map[category] || 'cat-advanced';
+}
+
+async function loadLabs() {
+    try {
+        const result = await apiCall('/api/labs/list');
+        if (!result.success) return;
+
+        const tbody = document.getElementById('labs-body');
+        tbody.innerHTML = '';
+
+        for (const lab of result.labs) {
+            const catClass = getCategoryClass(lab.category);
+            const existsIcon = lab.exists ?
+                '<i class="fas fa-check-circle text-success"></i>' :
+                '<i class="fas fa-times-circle text-danger"></i>';
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>TP${lab.number}</strong></td>
+                <td>${lab.name}</td>
+                <td class="text-muted small">${lab.description}</td>
+                <td><span class="category-badge ${catClass}">${lab.category}</span></td>
+                <td><code>${lab.user}</code></td>
+                <td class="small">${lab.duration}</td>
+                <td>${existsIcon} <code class="small">${lab.script}</code></td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-success" onclick="runLab('${lab.number}')" ${!lab.exists ? 'disabled' : ''} title="Run">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <button class="btn btn-outline-info" onclick="viewLog('${lab.number}')" ${!lab.has_log ? 'disabled' : ''} title="View Log">
+                            <i class="fas fa-file-alt"></i>
+                        </button>
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(row);
+        }
+    } catch (error) {
+        console.error('Failed to load labs:', error);
+    }
+}
+
+async function runLab(tpNumber) {
+    if (!confirm(`Run TP${tpNumber}? This will execute the script in background on the server.`)) return;
+
+    currentTP = tpNumber;
+    const logEl = document.getElementById('lab-log');
+    logEl.textContent = `Starting TP${tpNumber}...\n`;
+    document.getElementById('running-indicator').style.display = 'inline-block';
+
+    try {
+        const result = await apiCall('/api/labs/run', 'POST', { tp_number: tpNumber });
+
+        if (result.success) {
+            logEl.textContent += `${result.message}\nLog file: ${result.log_file}\n\nWaiting for output...\n`;
+            startLogPolling(tpNumber);
+        } else {
+            logEl.textContent += `ERROR: ${result.error}\n`;
+            document.getElementById('running-indicator').style.display = 'none';
+        }
+    } catch (error) {
+        logEl.textContent += `ERROR: ${error.message}\n`;
+        document.getElementById('running-indicator').style.display = 'none';
+    }
+
+    // Refresh labs list after a delay
+    setTimeout(loadLabs, 3000);
+}
+
+async function viewLog(tpNumber) {
+    currentTP = tpNumber;
+    const logEl = document.getElementById('lab-log');
+    logEl.textContent = `Loading log for TP${tpNumber}...\n`;
+
+    try {
+        const result = await apiCall(`/api/labs/log/${tpNumber}`);
+        if (result.success) {
+            logEl.textContent = result.logs || 'Empty log file.\n';
+            if (result.is_running) {
+                document.getElementById('running-indicator').style.display = 'inline-block';
+                startLogPolling(tpNumber);
+            } else {
+                document.getElementById('running-indicator').style.display = 'none';
+            }
+        }
+    } catch (error) {
+        logEl.textContent = `Error loading log: ${error.message}\n`;
+    }
+
+    // Scroll to bottom
+    const container = document.getElementById('log-container');
+    container.scrollTop = container.scrollHeight;
+}
+
+function startLogPolling(tpNumber) {
+    stopPolling();
+    let lastSize = 0;
+
+    logPolling = setInterval(async () => {
+        try {
+            const url = tpNumber === 'sequence' ?
+                '/api/labs/sequence-log' :
+                `/api/labs/log/${tpNumber}`;
+
+            const result = await fetch(url).then(r => r.json());
+
+            if (result.success && result.logs) {
+                const logEl = document.getElementById('lab-log');
+
+                if (result.size !== lastSize) {
+                    logEl.textContent = result.logs;
+                    lastSize = result.size;
+                    const container = document.getElementById('log-container');
+                    container.scrollTop = container.scrollHeight;
+                }
+
+                if (!result.is_running && result.size > 0) {
+                    stopPolling();
+                    logEl.textContent += '\n\n=== Script completed ===\n';
+                    loadLabs();
+                }
+            }
+        } catch (error) {
+            console.error('Polling error:', error);
+        }
+    }, 2000);
+}
+
+function stopPolling() {
+    if (logPolling) {
+        clearInterval(logPolling);
+        logPolling = null;
+    }
+    document.getElementById('running-indicator').style.display = 'none';
+}
+
+function clearLog() {
+    document.getElementById('lab-log').textContent = 'Log cleared.\n';
+    stopPolling();
+}
+
+async function runSequence(startTP, endTP) {
+    if (!confirm(`Run TP${startTP} through TP${endTP} in sequence?\n\nThis may take a while depending on which TPs are included.`)) return;
+
+    const logEl = document.getElementById('lab-log');
+    logEl.textContent = `Starting sequence TP${startTP} to TP${endTP}...\n`;
+    document.getElementById('running-indicator').style.display = 'inline-block';
+
+    try {
+        const result = await apiCall('/api/labs/run-sequence', 'POST', {
+            start: startTP,
+            end: endTP
+        });
+
+        if (result.success) {
+            logEl.textContent += `${result.message}\n`;
+            logEl.textContent += `TPs to run: ${result.tps.join(', ')}\n`;
+            logEl.textContent += `Log file: ${result.log_file}\n\nWaiting for output...\n`;
+            startLogPolling('sequence');
+        } else {
+            logEl.textContent += `ERROR: ${result.error}\n`;
+            document.getElementById('running-indicator').style.display = 'none';
+        }
+    } catch (error) {
+        logEl.textContent += `ERROR: ${error.message}\n`;
+        document.getElementById('running-indicator').style.display = 'none';
+    }
+}
+
+// Load labs on page load
+document.addEventListener('DOMContentLoaded', loadLabs);
+
+// Cleanup on page leave
+window.addEventListener('beforeunload', stopPolling);
+</script>
+{% endblock %}

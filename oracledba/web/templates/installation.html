@@ -289,10 +289,7 @@ async function downloadFromGoogleDrive() {
     document.getElementById('install-log').textContent = 'Starting download...\n';
     
     try {
-        const response = await apiCall('/api/installation/download', {
-            method: 'POST',
-            body: JSON.stringify({ source: 'google_drive' })
-        });
+        const response = await apiCall('/api/installation/download', 'POST', { source: 'google_drive' });
         
         if (response.error) {
             throw new Error(response.error);

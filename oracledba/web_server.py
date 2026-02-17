@@ -135,12 +135,14 @@ class SystemDetector:
             'grid': {
                 'installed': grid_installed,
                 'running': grid_running,
-                'status': 'Running' if grid_running else ('Installed' if grid_installed else 'Not Installed')
+                'status': 'Running' if grid_running else ('Installed' if grid_installed else 'Not Installed'),
+                'grid_home': '/u01/app/19.3.0/grid' if grid_installed else ''
             },
             'asm': {
                 'running': asm_running,
                 'installed': asm_installed,
-                'status': 'Running' if asm_running else 'Not Running'
+                'status': 'Running' if asm_running else 'Not Running',
+                'disk_groups': []
             },
             'features': {
                 'archivelog': False,
@@ -465,50 +467,56 @@ def api_oracle_metrics():
 @login_required
 def api_installation_status():
     """API: Get what's installed and what can be activated"""
-    detection = detector.detect_all()
+    try:
+        detection = detector.detect_all()
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+    binaries_val = detection.get('oracle', {}).get('binaries', False)
+    binaries_installed = binaries_val if isinstance(binaries_val, bool) else binaries_val.get('lsnrctl', False) if isinstance(binaries_val, dict) else False
     
     installation_status = {
         'components': {
             'oracle_database': {
-                'installed': detection['oracle']['installed'],
-                'version': detection['oracle']['version'],
-                'can_activate': detection['oracle']['installed'] and not detection['database']['running'],
-                'active': detection['database']['running'],
-                'binaries': detection['oracle']['binaries']
+                'installed': detection.get('oracle', {}).get('installed', False),
+                'version': detection.get('oracle', {}).get('version', 'Unknown'),
+                'can_activate': detection.get('oracle', {}).get('installed', False) and not detection.get('database', {}).get('running', False),
+                'active': detection.get('database', {}).get('running', False),
+                'binaries': binaries_val
             },
             'listener': {
-                'installed': detection['oracle']['binaries'] if isinstance(detection['oracle']['binaries'], bool) else detection['oracle']['binaries'].get('lsnrctl', False),
-                'can_activate': detection['oracle']['installed'] and not detection['listener']['running'],
-                'active': detection['listener']['running'],
-                'ports': detection['listener']['ports']
+                'installed': binaries_installed,
+                'can_activate': detection.get('oracle', {}).get('installed', False) and not detection.get('listener', {}).get('running', False),
+                'active': detection.get('listener', {}).get('running', False),
+                'ports': detection.get('listener', {}).get('ports', [])
             },
             'grid_infrastructure': {
-                'installed': detection['grid']['installed'],
-                'can_activate': detection['grid']['installed'] and not detection['grid']['running'],
-                'active': detection['grid']['running'],
-                'grid_home': detection['grid']['grid_home']
+                'installed': detection.get('grid', {}).get('installed', False),
+                'can_activate': detection.get('grid', {}).get('installed', False) and not detection.get('grid', {}).get('running', False),
+                'active': detection.get('grid', {}).get('running', False),
+                'grid_home': detection.get('grid', {}).get('grid_home', '')
             },
             'asm': {
-                'installed': detection['asm']['installed'],
-                'can_activate': detection['asm']['installed'] and not detection['asm']['running'],
-                'active': detection['asm']['running'],
-                'disk_groups': detection['asm']['disk_groups']
+                'installed': detection.get('asm', {}).get('installed', False),
+                'can_activate': detection.get('asm', {}).get('installed', False) and not detection.get('asm', {}).get('running', False),
+                'active': detection.get('asm', {}).get('running', False),
+                'disk_groups': detection.get('asm', {}).get('disk_groups', [])
             }
         },
-        'features': detection['features'],
+        'features': detection.get('features', {}),
         'summary': {
             'total_components': 4,
             'installed': sum([
-                detection['oracle']['installed'],
-                detection['oracle']['binaries'] if isinstance(detection['oracle']['binaries'], bool) else detection['oracle']['binaries'].get('lsnrctl', False),
-                detection['grid']['installed'],
-                detection['asm']['installed']
+                detection.get('oracle', {}).get('installed', False),
+                binaries_installed,
+                detection.get('grid', {}).get('installed', False),
+                detection.get('asm', {}).get('installed', False)
             ]),
             'active': sum([
-                detection['database']['running'],
-                detection['listener']['running'],
-                detection['grid']['running'],
-                detection['asm']['running']
+                detection.get('database', {}).get('running', False),
+                detection.get('listener', {}).get('running', False),
+                detection.get('grid', {}).get('running', False),
+                detection.get('asm', {}).get('running', False)
             ])
         }
     }
@@ -1031,246 +1039,92 @@ def api_installation_precheck():
 @login_required
 @admin_required
 def api_installation_system():
-    """Install system prerequisites"""
-    import subprocess
+    """Install system prerequisites - runs TP01 directly"""
     try:
-        # Create install script
-        script_content = """#!/bin/bash
-set -e
-
-echo "=== System Prerequisites Installation ==="
-echo "Timestamp: $(date)"
-echo ""
-
-# Run oradba precheck first
-echo "Running system precheck..."
-oradba precheck 2>&1 || true
-echo ""
-
-# Run system installation
-echo "=== Installing System Prerequisites ==="
-echo "This will configure users, groups, and kernel parameters..."
-echo ""
-
-oradba install system 2>&1
-
-echo ""
-echo "=== System Installation Complete ==="
-"""
-        
-        script_path = '/tmp/oracle-install-system.sh'
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        
-        os.chmod(script_path, 0o755)
-        
-        # Execute script in background
-        cmd = f"nohup bash {script_path} > /tmp/oracle-install-system.log 2>&1 &"
-        subprocess.Popen(cmd, shell=True)
-        
-        return jsonify({
-            'success': True,
-            'message': 'System installation started in background',
-            'log_file': '/tmp/oracle-install-system.log'
-        })
+        result = run_tp_script('01', background=True, as_user='root')
+        if result.get('success'):
+            result['message'] = 'System prerequisites installation started (TP01)'
+            result['log_file'] = '/tmp/tp01.log'
+        return jsonify(result)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/installation/binaries', methods=['POST'])
 @login_required
 @admin_required
 def api_installation_binaries():
-    """Install Oracle binaries"""
-    import subprocess
-    data = request.json or {}
-    oracle_home = data.get('oracle_home', '/u01/app/oracle/product/19.3.0/dbhome_1')
-    
+    """Install Oracle binaries - runs TP02 directly"""
     try:
-        # Create install script
-        script_content = f"""#!/bin/bash
-set -e
-
-echo "=== Oracle Binaries Installation ==="
-echo "Timestamp: $(date)"
-echo "Oracle Home: {oracle_home}"
-echo ""
-
-# Check if zip file exists
-ZIP_FILE="{oracle_home}/LINUX.X64_193000_db_home.zip"
-if [ ! -f "$ZIP_FILE" ]; then
-    echo "ERROR: Oracle software not found at $ZIP_FILE"
-    echo "Please download it first!"
-    exit 1
-fi
-
-echo "Oracle software found: $ZIP_FILE"
-echo "Size: $(du -h $ZIP_FILE | cut -f1)"
-echo ""
-
-# Unzip Oracle software
-echo "=== Extracting Oracle binaries ==="
-echo "This may take 5-10 minutes..."
-cd {oracle_home}
-unzip -q LINUX.X64_193000_db_home.zip
-
-echo ""
-echo "=== Verifying installation ==="
-ls -l {oracle_home}/runInstaller
-
-echo ""
-echo "=== Running Oracle installer ==="
-export ORACLE_HOME={oracle_home}
-oradba install binaries 2>&1
-
-echo ""
-echo "=== Binaries Installation Complete ==="
-"""
-        
-        script_path = '/tmp/oracle-install-binaries.sh'
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        
-        os.chmod(script_path, 0o755)
-        
-        # Execute script in background
-        cmd = f"nohup bash {script_path} > /tmp/oracle-install-binaries.log 2>&1 &"
-        subprocess.Popen(cmd, shell=True)
-        
-        return jsonify({
-            'success': True,
-            'message': f'Binary installation started to {oracle_home}',
-            'log_file': '/tmp/oracle-install-binaries.log'
-        })
+        result = run_tp_script('02', background=True, as_user='oracle')
+        if result.get('success'):
+            result['message'] = 'Oracle binaries installation started (TP02)'
+            result['log_file'] = '/tmp/tp02.log'
+        return jsonify(result)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/installation/database', methods=['POST'])
 @login_required
 @admin_required
 def api_installation_database():
-    """Create Oracle database"""
-    import subprocess
-    data = request.json or {}
-    db_name = data.get('db_name', 'ORCL')
-    
+    """Create Oracle database - runs TP03 directly"""
     try:
-        # Create install script
-        script_content = f"""#!/bin/bash
-set -e
-
-echo "=== Oracle Database Creation ==="
-echo "Timestamp: $(date)"
-echo "Database Name: {db_name}"
-echo ""
-
-echo "=== Creating database {db_name} ==="
-echo "This may take 15-30 minutes..."
-echo ""
-
-oradba install database --name {db_name} 2>&1
-
-echo ""
-echo "=== Database Creation Complete ==="
-echo "Database {db_name} is now running"
-echo ""
-echo "You can connect with:"
-echo "  sqlplus / as sysdba"
-echo ""
-"""
-        
-        script_path = '/tmp/oracle-install-database.sh'
-        with open(script_path, 'w') as f:
-            f.write(script_content)
-        
-        os.chmod(script_path, 0o755)
-        
-        # Execute script in background
-        cmd = f"nohup bash {script_path} > /tmp/oracle-install-database.log 2>&1 &"
-        subprocess.Popen(cmd, shell=True)
-        
-        return jsonify({
-            'success': True,
-            'message': f'Database creation started for {db_name}',
-            'log_file': '/tmp/oracle-install-database.log'
-        })
+        result = run_tp_script('03', background=True, as_user='oracle')
+        if result.get('success'):
+            result['message'] = 'Database creation started (TP03)'
+            result['log_file'] = '/tmp/tp03.log'
+        return jsonify(result)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/installation/quick', methods=['POST'])
 @login_required
 @admin_required
 def api_installation_quick():
-    """Quick one-click installation - runs all CLI commands in sequence"""
-    import subprocess
-    data = request.json or {}
-    oracle_home = data.get('oracle_home', '/u01/app/oracle/product/19.3.0/dbhome_1')
-    db_name = data.get('db_name', 'ORCL')
-    
+    """Quick one-click installation - runs TP01+TP02+TP03 in sequence"""
     try:
-        # Create comprehensive installation script that uses working CLI commands
+        scripts_dir = Path(__file__).parent / 'scripts'
+        
+        # Build a master script that runs all 3 TPs using the actual scripts
         script_content = f"""#!/bin/bash
 set -e
 
 echo "=============================================="
 echo "  ORACLE 19c - AUTOMATED INSTALLATION"
+echo "  Using TP Scripts (Direct Execution)"
 echo "  Started: $(date)"
 echo "=============================================="
 echo ""
 
-# Function for timestamped logging
 log() {{
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }}
 
-# ===== STEP 1/4: System Validation =====
-log "STEP 1/4: Running system precheck..."
+# ===== STEP 1/3: System Readiness (TP01) =====
+log "STEP 1/3: Running TP01 - System Readiness..."
 echo ""
-oradba precheck 2>&1 || {{
-    log "⚠ Precheck found issues, but continuing..."
-}}
+bash {scripts_dir}/tp01-system-readiness.sh
 echo ""
-log "✓ System validation complete"
+log "✓ TP01 System Readiness complete"
 echo ""
 
-# ===== STEP 2/4: System Prerequisites =====
-log "STEP 2/4: Installing system prerequisites..."
-log "This configures users, groups, and kernel parameters..."
+# ===== STEP 2/3: Binary Installation (TP02) =====
+log "STEP 2/3: Running TP02 - Binary Installation..."
 echo ""
-oradba install system 2>&1
+su - oracle -c "source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8; bash {scripts_dir}/tp02-installation-binaire.sh"
 echo ""
-log "✓ System prerequisites installed successfully"
-echo ""
-
-# ===== STEP 3/4: Oracle Binaries =====
-log "STEP 3/4: Installing Oracle binaries..."
-log "Oracle Home: {oracle_home}"
-log "This may take 10-15 minutes..."
-echo ""
-export ORACLE_HOME="{oracle_home}"
-oradba install binaries 2>&1
-echo ""
-log "✓ Oracle binaries installed successfully"
+log "✓ TP02 Binary Installation complete"
 echo ""
 
-# ===== STEP 4/4: Database Creation =====
-log "STEP 4/4: Creating database {db_name}..."
-log "This may take 15-30 minutes..."
+# ===== STEP 3/3: Database Creation (TP03) =====
+log "STEP 3/3: Running TP03 - Database Creation..."
 echo ""
-oradba install database --name {db_name} 2>&1
+su - oracle -c "source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8; bash {scripts_dir}/tp03-creation-instance.sh"
 echo ""
-log "✓ Database {db_name} created successfully"
+log "✓ TP03 Database Creation complete"
 echo ""
 
 echo "=============================================="
@@ -1279,6 +1133,7 @@ echo "  Finished: $(date)"
 echo "=============================================="
 echo ""
 echo "You can now connect with:"
+echo "  su - oracle"
 echo "  sqlplus / as sysdba"
 echo ""
 """
@@ -1295,20 +1150,16 @@ echo ""
         
         return jsonify({
             'success': True,
-            'message': 'Automated installation started! This will take 30-60 minutes.',
+            'message': 'Automated installation started (TP01+TP02+TP03)! This will take 30-60 minutes.',
             'log_file': '/tmp/oracle-quick-install.log',
             'steps': [
-                {'step': 1, 'name': 'System Validation', 'status': 'running'},
-                {'step': 2, 'name': 'System Prerequisites', 'status': 'pending'},
-                {'step': 3, 'name': 'Oracle Binaries', 'status': 'pending'},
-                {'step': 4, 'name': 'Database Creation', 'status': 'pending'}
+                {'step': 1, 'name': 'TP01: System Readiness', 'status': 'running'},
+                {'step': 2, 'name': 'TP02: Binary Installation', 'status': 'pending'},
+                {'step': 3, 'name': 'TP03: Database Creation', 'status': 'pending'}
             ]
         })
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/api/installation/logs/<log_type>')
@@ -1320,9 +1171,9 @@ def api_installation_logs(log_type):
     try:
         log_files = {
             'download': '/tmp/oracle-download.log',
-            'system': '/tmp/oracle-install-system.log',
-            'binaries': '/tmp/oracle-install-binaries.log',
-            'database': '/tmp/oracle-install-database.log',
+            'system': '/tmp/tp01.log',
+            'binaries': '/tmp/tp02.log',
+            'database': '/tmp/tp03.log',
             'quick': '/tmp/oracle-quick-install.log'
         }
         
@@ -1372,13 +1223,21 @@ def api_installation_logs(log_type):
 # ============================================================================
 
 def execute_cli_command(args, timeout=300):
-    """Execute OracleDBA CLI command"""
+    """Execute OracleDBA CLI command with proper PATH"""
+    oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+    env = os.environ.copy()
+    env['PATH'] = f"{oracle_home}/bin:/usr/local/bin:/usr/bin:/bin:" + env.get('PATH', '')
+    env['ORACLE_HOME'] = oracle_home
+    env['ORACLE_SID'] = os.environ.get('ORACLE_SID', 'GDCPROD')
+    env['CV_ASSUME_DISTID'] = 'OEL7.8'
+    
     try:
         result = subprocess.run(
             args,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=env
         )
         
         output = result.stdout
@@ -1388,8 +1247,774 @@ def execute_cli_command(args, timeout=300):
         return output
     except subprocess.TimeoutExpired:
         return "Command timed out after 5 minutes"
+    except FileNotFoundError:
+        return f"Command not found: {args[0]}. Make sure package is installed (pip install -e .)"
     except Exception as e:
         return f"Error executing command: {str(e)}"
+
+
+def run_sqlplus(sql, as_sysdba=True, timeout=60):
+    """Run SQL command via sqlplus and return output"""
+    oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+    oracle_sid = os.environ.get('ORACLE_SID', 'GDCPROD')
+    
+    env = os.environ.copy()
+    env['ORACLE_HOME'] = oracle_home
+    env['ORACLE_SID'] = oracle_sid
+    env['PATH'] = f"{oracle_home}/bin:" + env.get('PATH', '')
+    
+    connect_str = '/ as sysdba' if as_sysdba else '/'
+    
+    full_sql = f"""SET PAGESIZE 1000
+SET LINESIZE 200
+SET FEEDBACK OFF
+SET HEADING ON
+{sql}
+EXIT;
+"""
+    
+    try:
+        # Try as oracle user if running as root
+        uid = -1
+        try:
+            uid = os.getuid()
+        except:
+            uid = -1
+        
+        if uid == 0:
+            cmd = ['su', '-', 'oracle', '-c', f'echo "{full_sql}" | {oracle_home}/bin/sqlplus -s "{connect_str}"']
+        else:
+            cmd = ['bash', '-c', f'echo "{full_sql}" | {oracle_home}/bin/sqlplus -s "{connect_str}"']
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        return result.stdout.strip()
+    except Exception as e:
+        return f"SQL Error: {str(e)}"
+
+
+def run_tp_script(tp_number, background=True, as_user='oracle'):
+    """Run a TP script from the scripts directory"""
+    scripts_dir = Path(__file__).parent / 'scripts'
+    
+    tp_map = {
+        '01': ('tp01-system-readiness.sh', 'root'),
+        '02': ('tp02-installation-binaire.sh', 'oracle'),
+        '03': ('tp03-creation-instance.sh', 'oracle'),
+        '04': ('tp04-fichiers-critiques.sh', 'oracle'),
+        '05': ('tp05-gestion-stockage.sh', 'oracle'),
+        '06': ('tp06-securite-acces.sh', 'oracle'),
+        '07': ('tp07-flashback.sh', 'oracle'),
+        '08': ('tp08-rman.sh', 'oracle'),
+        '09': ('tp09-dataguard.sh', 'oracle'),
+        '10': ('tp10-tuning.sh', 'oracle'),
+        '11': ('tp11-patching.sh', 'oracle'),
+        '12': ('tp12-multitenant.sh', 'oracle'),
+        '13': ('tp13-ai-foundations.sh', 'oracle'),
+        '14': ('tp14-mobilite-concurrence.sh', 'oracle'),
+        '15': ('tp15-asm-rac-concepts.sh', 'oracle'),
+    }
+    
+    if tp_number not in tp_map:
+        return {'success': False, 'error': f'Unknown TP: {tp_number}'}
+    
+    script_name, default_user = tp_map[tp_number]
+    script_path = scripts_dir / script_name
+    
+    if not script_path.exists():
+        return {'success': False, 'error': f'Script not found: {script_path}'}
+    
+    log_file = f'/tmp/tp{tp_number}.log'
+    run_user = as_user or default_user
+    
+    env_setup = 'source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8;'
+    
+    is_root = False
+    try:
+        is_root = os.getuid() == 0
+    except AttributeError:
+        pass
+    
+    if background:
+        if run_user == 'oracle' and is_root:
+            cmd = f'nohup su - oracle -c "{env_setup} bash {script_path}" > {log_file} 2>&1 &'
+        else:
+            cmd = f'nohup bash {script_path} > {log_file} 2>&1 &'
+        
+        subprocess.Popen(cmd, shell=True)
+        return {
+            'success': True,
+            'message': f'TP{tp_number} ({script_name}) started in background',
+            'log_file': log_file,
+            'script': script_name
+        }
+    else:
+        try:
+            if run_user == 'oracle' and is_root:
+                cmd = ['su', '-', 'oracle', '-c', f'{env_setup} bash {script_path}']
+            else:
+                cmd = ['bash', str(script_path)]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            
+            # Also write to log file
+            with open(log_file, 'w') as f:
+                f.write(result.stdout)
+                if result.stderr:
+                    f.write('\n--- STDERR ---\n')
+                    f.write(result.stderr)
+            
+            return {
+                'success': result.returncode == 0,
+                'output': result.stdout + ('\n' + result.stderr if result.stderr else ''),
+                'log_file': log_file
+            }
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'Script timed out (>60 min)'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+
+def run_shell_command(command, as_oracle=True, timeout=120):
+    """Run a shell command and return output"""
+    try:
+        uid = -1
+        try:
+            uid = os.getuid()
+        except:
+            uid = -1
+        
+        if as_oracle and uid == 0:
+            cmd = ['su', '-', 'oracle', '-c', command]
+        else:
+            cmd = ['bash', '-c', command]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return result.stdout + (result.stderr if result.stderr else '')
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+# ============================================================================
+# LABS - RUN ANY TP SCRIPT FROM GUI
+# ============================================================================
+
+@app.route('/labs')
+@login_required
+def labs():
+    """Labs management page - run any TP script"""
+    return render_template('labs.html')
+
+
+@app.route('/api/labs/list')
+@login_required
+def api_labs_list():
+    """API: List all available TP labs"""
+    labs_info = [
+        {'number': '01', 'name': 'System Readiness', 'description': 'Users, groups, packages, kernel params', 'category': 'Installation', 'user': 'root', 'duration': '5-10 min'},
+        {'number': '02', 'name': 'Binary Installation', 'description': 'Download Oracle 19c binaries (3GB)', 'category': 'Installation', 'user': 'oracle', 'duration': '10-20 min'},
+        {'number': '03', 'name': 'Database Creation', 'description': 'runInstaller + DBCA database', 'category': 'Installation', 'user': 'oracle', 'duration': '15-30 min'},
+        {'number': '04', 'name': 'Critical Files', 'description': 'Multiplex control files, redo logs', 'category': 'Configuration', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '05', 'name': 'Storage Management', 'description': 'Tablespaces, datafiles, OMF', 'category': 'Configuration', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '06', 'name': 'Security & Access', 'description': 'Users, roles, profiles, privileges', 'category': 'Security', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '07', 'name': 'Flashback', 'description': 'Flashback query, table, database', 'category': 'Protection', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '08', 'name': 'RMAN Backup', 'description': 'Backup strategies and recovery', 'category': 'Protection', 'user': 'oracle', 'duration': '10 min'},
+        {'number': '09', 'name': 'Data Guard', 'description': 'High availability standby setup', 'category': 'HA', 'user': 'oracle', 'duration': '10 min'},
+        {'number': '10', 'name': 'Performance Tuning', 'description': 'AWR, SQL tuning, optimization', 'category': 'Performance', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '11', 'name': 'Patching', 'description': 'Oracle patches and updates', 'category': 'Maintenance', 'user': 'oracle', 'duration': '5 min'},
+        {'number': '12', 'name': 'Multitenant', 'description': 'CDB/PDB management', 'category': 'Architecture', 'user': 'oracle', 'duration': '10 min'},
+        {'number': '13', 'name': 'AI/ML Foundations', 'description': 'Oracle Machine Learning', 'category': 'Advanced', 'user': 'oracle', 'duration': '10 min'},
+        {'number': '14', 'name': 'Data Mobility', 'description': 'Data Pump, transportable tablespaces', 'category': 'Advanced', 'user': 'oracle', 'duration': '10 min'},
+        {'number': '15', 'name': 'ASM/RAC Concepts', 'description': 'Clustering and ASM architecture', 'category': 'Advanced', 'user': 'oracle', 'duration': '5 min'},
+    ]
+    
+    # Check which scripts exist
+    scripts_dir = Path(__file__).parent / 'scripts'
+    for lab in labs_info:
+        tp_map = {
+            '01': 'tp01-system-readiness.sh', '02': 'tp02-installation-binaire.sh',
+            '03': 'tp03-creation-instance.sh', '04': 'tp04-fichiers-critiques.sh',
+            '05': 'tp05-gestion-stockage.sh', '06': 'tp06-securite-acces.sh',
+            '07': 'tp07-flashback.sh', '08': 'tp08-rman.sh',
+            '09': 'tp09-dataguard.sh', '10': 'tp10-tuning.sh',
+            '11': 'tp11-patching.sh', '12': 'tp12-multitenant.sh',
+            '13': 'tp13-ai-foundations.sh', '14': 'tp14-mobilite-concurrence.sh',
+            '15': 'tp15-asm-rac-concepts.sh',
+        }
+        script_file = tp_map.get(lab['number'], '')
+        lab['script'] = script_file
+        lab['exists'] = (scripts_dir / script_file).exists() if script_file else False
+        
+        # Check if log exists
+        log_file = f"/tmp/tp{lab['number']}.log"
+        lab['has_log'] = os.path.exists(log_file)
+    
+    return jsonify({'success': True, 'labs': labs_info})
+
+
+@app.route('/api/labs/run', methods=['POST'])
+@login_required
+@admin_required
+def api_labs_run():
+    """API: Run a TP lab script"""
+    data = request.json or {}
+    tp_number = data.get('tp_number', '')
+    background = data.get('background', True)
+    
+    if not tp_number:
+        return jsonify({'success': False, 'error': 'No TP number provided'})
+    
+    result = run_tp_script(tp_number, background=background)
+    return jsonify(result)
+
+
+@app.route('/api/labs/log/<tp_number>')
+@login_required
+def api_labs_log(tp_number):
+    """API: Get TP lab log"""
+    log_file = f'/tmp/tp{tp_number}.log'
+    
+    if not os.path.exists(log_file):
+        return jsonify({'success': True, 'logs': f'No log yet for TP{tp_number}. Run the lab first.\n', 'size': 0, 'is_running': False})
+    
+    try:
+        file_size = os.path.getsize(log_file)
+        with open(log_file, 'r') as f:
+            content = f.read()
+        
+        # Check if script is still running
+        is_running = False
+        scripts_dir = Path(__file__).parent / 'scripts'
+        try:
+            proc = subprocess.run(['pgrep', '-f', f'tp{tp_number}'], capture_output=True)
+            is_running = proc.returncode == 0
+        except:
+            pass
+        
+        return jsonify({'success': True, 'logs': content, 'size': file_size, 'is_running': is_running})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/labs/run-sequence', methods=['POST'])
+@login_required
+@admin_required
+def api_labs_run_sequence():
+    """API: Run a sequence of TP labs (e.g., 01-03 for full install)"""
+    data = request.json or {}
+    start_tp = data.get('start', '01')
+    end_tp = data.get('end', '03')
+    
+    all_tps = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15']
+    
+    try:
+        start_idx = all_tps.index(start_tp)
+        end_idx = all_tps.index(end_tp) + 1
+        tps_to_run = all_tps[start_idx:end_idx]
+    except ValueError:
+        return jsonify({'success': False, 'error': f'Invalid range: {start_tp} to {end_tp}'})
+    
+    # Create a master script that runs all TPs in sequence
+    scripts_dir = Path(__file__).parent / 'scripts'
+    log_file = f'/tmp/tp-sequence-{start_tp}-{end_tp}.log'
+    
+    tp_map = {
+        '01': 'tp01-system-readiness.sh', '02': 'tp02-installation-binaire.sh',
+        '03': 'tp03-creation-instance.sh', '04': 'tp04-fichiers-critiques.sh',
+        '05': 'tp05-gestion-stockage.sh', '06': 'tp06-securite-acces.sh',
+        '07': 'tp07-flashback.sh', '08': 'tp08-rman.sh',
+        '09': 'tp09-dataguard.sh', '10': 'tp10-tuning.sh',
+        '11': 'tp11-patching.sh', '12': 'tp12-multitenant.sh',
+        '13': 'tp13-ai-foundations.sh', '14': 'tp14-mobilite-concurrence.sh',
+        '15': 'tp15-asm-rac-concepts.sh',
+    }
+    
+    script_lines = ['#!/bin/bash', 'set -e', f'echo "=== Running TPs {start_tp} to {end_tp} ==="', f'echo "Started: $(date)"', '']
+    
+    for tp in tps_to_run:
+        script_name = tp_map.get(tp, '')
+        script_path = scripts_dir / script_name
+        if script_path.exists():
+            script_lines.append(f'echo ""')
+            script_lines.append(f'echo "============================================="')
+            script_lines.append(f'echo "=== TP{tp}: {script_name} ==="')
+            script_lines.append(f'echo "============================================="')
+            script_lines.append(f'bash {script_path}')
+            script_lines.append(f'echo "=== TP{tp} completed ==="')
+    
+    script_lines.append('')
+    script_lines.append('echo ""')
+    script_lines.append(f'echo "=== All TPs {start_tp} to {end_tp} completed ==="')
+    script_lines.append(f'echo "Finished: $(date)"')
+    
+    master_script = '/tmp/tp-sequence.sh'
+    with open(master_script, 'w') as f:
+        f.write('\n'.join(script_lines))
+    
+    os.chmod(master_script, 0o755)
+    
+    cmd = f'nohup bash {master_script} > {log_file} 2>&1 &'
+    subprocess.Popen(cmd, shell=True)
+    
+    return jsonify({
+        'success': True,
+        'message': f'Running TPs {start_tp} to {end_tp} in sequence',
+        'tps': tps_to_run,
+        'log_file': log_file
+    })
+
+
+@app.route('/api/labs/sequence-log')
+@login_required
+def api_labs_sequence_log():
+    """API: Get the sequence run log"""
+    # Find the most recent sequence log
+    import glob
+    log_files = glob.glob('/tmp/tp-sequence-*.log')
+    
+    if not log_files:
+        return jsonify({'success': True, 'logs': 'No sequence log found.\n', 'size': 0, 'is_running': False})
+    
+    log_file = max(log_files, key=os.path.getmtime)
+    
+    try:
+        file_size = os.path.getsize(log_file)
+        with open(log_file, 'r') as f:
+            content = f.read()
+        
+        is_running = False
+        try:
+            proc = subprocess.run(['pgrep', '-f', 'tp-sequence.sh'], capture_output=True)
+            is_running = proc.returncode == 0
+        except:
+            pass
+        
+        return jsonify({'success': True, 'logs': content, 'size': file_size, 'is_running': is_running})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+# ============================================================================
+# MISSING STORAGE API ROUTES (referenced by storage.html)
+# ============================================================================
+
+@app.route('/api/storage/controlfile/multiplex', methods=['POST'])
+@login_required
+@admin_required
+def api_storage_controlfile_multiplex():
+    """API: Multiplex control files (runs TP04)"""
+    result = run_tp_script('04', background=True)
+    return jsonify(result)
+
+
+@app.route('/api/storage/controlfile/list')
+@login_required
+def api_storage_controlfile_list():
+    """API: List control files"""
+    output = run_sqlplus("SELECT name, status FROM v\\$controlfile;")
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/storage/redolog/multiplex', methods=['POST'])
+@login_required
+@admin_required
+def api_storage_redolog_multiplex():
+    """API: Multiplex redo logs (runs TP04)"""
+    result = run_tp_script('04', background=True)
+    return jsonify(result)
+
+
+@app.route('/api/storage/redolog/list')
+@login_required
+def api_storage_redolog_list():
+    """API: List redo log files"""
+    output = run_sqlplus("SELECT group#, member, type, status FROM v\\$logfile ORDER BY group#;")
+    return jsonify({'success': True, 'output': output})
+
+
+# ============================================================================
+# MISSING PROTECTION API ROUTES (referenced by protection.html)
+# ============================================================================
+
+@app.route('/api/protection/fra/status')
+@login_required
+def api_protection_fra_status():
+    """API: FRA (Fast Recovery Area) status"""
+    output = run_sqlplus("SELECT name, space_limit/1024/1024 AS size_mb, space_used/1024/1024 AS used_mb FROM v\\$recovery_file_dest;")
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/protection/fra/enable', methods=['POST'])
+@login_required
+@admin_required
+def api_protection_fra_enable():
+    """API: Enable FRA"""
+    sql = """
+ALTER SYSTEM SET db_recovery_file_dest_size = 10G SCOPE=BOTH;
+ALTER SYSTEM SET db_recovery_file_dest = '/u01/app/oracle/fast_recovery_area' SCOPE=BOTH;
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/protection/flashback/status')
+@login_required
+def api_protection_flashback_status():
+    """API: Flashback Database status"""
+    output = run_sqlplus("SELECT flashback_on, log_mode FROM v\\$database;")
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/protection/flashback/enable', methods=['POST'])
+@login_required
+@admin_required
+def api_protection_flashback_enable():
+    """API: Enable Flashback Database"""
+    sql = """
+ALTER DATABASE FLASHBACK ON;
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/rman/configure', methods=['POST'])
+@login_required
+@admin_required
+def api_rman_configure():
+    """API: Configure RMAN"""
+    data = request.json or {}
+    retention = data.get('retention', 7)
+    
+    oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+    rman_cmds = f"""
+CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF {retention} DAYS;
+CONFIGURE CONTROLFILE AUTOBACKUP ON;
+CONFIGURE DEVICE TYPE DISK PARALLELISM 2;
+CONFIGURE BACKUP OPTIMIZATION ON;
+"""
+    
+    cmd = f'source ~/.bash_profile 2>/dev/null; echo "{rman_cmds}" | {oracle_home}/bin/rman target /'
+    output = run_shell_command(cmd, as_oracle=True)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/flashback/database', methods=['POST'])
+@login_required
+@admin_required
+def api_flashback_database():
+    """API: Flashback Database"""
+    data = request.json or {}
+    scn = data.get('scn', '')
+    timestamp = data.get('timestamp', '')
+    
+    if timestamp:
+        sql = f"FLASHBACK DATABASE TO TIMESTAMP TO_TIMESTAMP('{timestamp}', 'YYYY-MM-DD HH24:MI:SS');"
+    elif scn:
+        sql = f"FLASHBACK DATABASE TO SCN {scn};"
+    else:
+        return jsonify({'success': False, 'error': 'Provide SCN or timestamp'})
+    
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/flashback/table', methods=['POST'])
+@login_required
+@admin_required
+def api_flashback_table():
+    """API: Flashback Table"""
+    data = request.json or {}
+    table_name = data.get('table', '')
+    timestamp = data.get('timestamp', '')
+    
+    if not table_name or not timestamp:
+        return jsonify({'success': False, 'error': 'Provide table name and timestamp'})
+    
+    sql = f"""
+ALTER TABLE {table_name} ENABLE ROW MOVEMENT;
+FLASHBACK TABLE {table_name} TO TIMESTAMP TO_TIMESTAMP('{timestamp}', 'YYYY-MM-DD HH24:MI:SS');
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+# ============================================================================
+# MISSING SECURITY API ROUTES (referenced by security.html)
+# ============================================================================
+
+@app.route('/api/security/grant', methods=['POST'])
+@login_required
+@admin_required
+def api_security_grant():
+    """API: Grant privileges"""
+    data = request.json or {}
+    username = data.get('username', '')
+    privilege = data.get('privilege', '')
+    
+    if not username or not privilege:
+        return jsonify({'success': False, 'error': 'Provide username and privilege'})
+    
+    output = run_sqlplus(f"GRANT {privilege} TO {username};")
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/security/profile/create', methods=['POST'])
+@login_required
+@admin_required
+def api_security_profile_create():
+    """API: Create password profile"""
+    data = request.json or {}
+    name = data.get('name', '')
+    
+    if not name:
+        return jsonify({'success': False, 'error': 'Provide profile name'})
+    
+    sql = f"""
+CREATE PROFILE {name} LIMIT
+    SESSIONS_PER_USER 5
+    FAILED_LOGIN_ATTEMPTS 3
+    PASSWORD_LOCK_TIME 1/24
+    PASSWORD_LIFE_TIME 90
+    PASSWORD_GRACE_TIME 7
+    PASSWORD_REUSE_TIME 365
+    PASSWORD_REUSE_MAX 12;
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/security/audit/configure', methods=['POST'])
+@login_required
+@admin_required
+def api_security_audit_configure():
+    """API: Configure auditing"""
+    data = request.json or {}
+    action = data.get('action', 'enable')
+    
+    if action == 'enable':
+        sql = """
+ALTER SYSTEM SET audit_trail = DB,EXTENDED SCOPE=SPFILE;
+AUDIT CREATE SESSION;
+AUDIT ALTER SYSTEM;
+AUDIT CREATE USER;
+AUDIT DROP USER;
+AUDIT ALTER USER;
+AUDIT GRANT;
+AUDIT REVOKE;
+"""
+    else:
+        sql = "NOAUDIT ALL;"
+    
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/security/audit/view')
+@login_required
+def api_security_audit_view():
+    """API: View audit records"""
+    sql = """
+SELECT username, action_name, timestamp, returncode
+FROM dba_audit_trail
+WHERE timestamp > SYSDATE - 7
+ORDER BY timestamp DESC
+FETCH FIRST 50 ROWS ONLY;
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
+
+
+# ============================================================================
+# MISSING CLUSTER API ROUTES (referenced by cluster.html)
+# ============================================================================
+
+@app.route('/api/cluster/nfs/configure', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_nfs_configure():
+    """API: Configure NFS"""
+    data = request.json or {}
+    server_ip = data.get('server_ip', '')
+    export_path = data.get('export_path', '/shared/oracle')
+    mount_point = data.get('mount_point', '/mnt/oracle_shared')
+    
+    script = f"""#!/bin/bash
+set -e
+echo "=== NFS Configuration ==="
+
+# Install NFS
+dnf install -y nfs-utils 2>/dev/null || yum install -y nfs-utils
+
+# Create export directory
+mkdir -p {export_path}
+chown oracle:oinstall {export_path}
+
+# Configure exports
+echo "{export_path} *(rw,sync,no_root_squash,no_subtree_check)" >> /etc/exports
+
+# Start NFS
+systemctl enable --now nfs-server
+exportfs -ra
+
+echo "NFS server configured: {export_path}"
+echo "Clients can mount with: mount {server_ip}:{export_path} {mount_point}"
+"""
+    
+    script_path = '/tmp/nfs-setup.sh'
+    with open(script_path, 'w') as f:
+        f.write(script)
+    os.chmod(script_path, 0o755)
+    
+    log_file = '/tmp/nfs-setup.log'
+    cmd = f'nohup bash {script_path} > {log_file} 2>&1 &'
+    subprocess.Popen(cmd, shell=True)
+    
+    return jsonify({'success': True, 'message': 'NFS configuration started', 'log_file': log_file})
+
+
+@app.route('/api/cluster/nfs/test')
+@login_required
+def api_cluster_nfs_test():
+    """API: Test NFS status"""
+    output = run_shell_command('exportfs -v 2>/dev/null; echo "---"; showmount -e localhost 2>/dev/null || echo "NFS not configured"', as_oracle=False)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/grid/install', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_grid_install():
+    """API: Install Grid Infrastructure"""
+    result = run_tp_script('15', background=True)
+    return jsonify(result)
+
+
+@app.route('/api/cluster/grid/status')
+@login_required
+def api_cluster_grid_status():
+    """API: Grid Infrastructure status"""
+    output = run_shell_command('crsctl stat res -t 2>/dev/null || echo "Grid Infrastructure not installed"', as_oracle=False)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/asm/configure', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_asm_configure():
+    """API: Configure ASM"""
+    result = run_tp_script('15', background=True)
+    return jsonify(result)
+
+
+@app.route('/api/cluster/asm/status')
+@login_required
+def api_cluster_asm_status():
+    """API: ASM status"""
+    output = run_shell_command('asmcmd lsdg 2>/dev/null || echo "ASM not configured"', as_oracle=True)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/start', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_start():
+    """API: Start cluster services"""
+    output = run_shell_command('crsctl start has 2>/dev/null || echo "Grid not installed"', as_oracle=False)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/stop', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_stop():
+    """API: Stop cluster services"""
+    output = run_shell_command('crsctl stop has 2>/dev/null || echo "Grid not installed"', as_oracle=False)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/ssh/setup', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_ssh_setup():
+    """API: Setup SSH equivalence"""
+    data = request.json or {}
+    target_hosts = data.get('hosts', [])
+    
+    if not target_hosts:
+        return jsonify({'success': False, 'error': 'No target hosts provided'})
+    
+    script = f"""#!/bin/bash
+echo "=== SSH Equivalence Setup ==="
+
+# Generate SSH key if not exists
+if [ ! -f ~/.ssh/id_rsa ]; then
+    ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
+    echo "SSH key generated"
+fi
+
+# Copy key to target hosts
+for HOST in {' '.join(target_hosts)}; do
+    echo "Setting up SSH to $HOST..."
+    ssh-copy-id -o StrictHostKeyChecking=no oracle@$HOST 2>/dev/null || echo "Could not connect to $HOST"
+done
+
+echo "=== SSH Setup Complete ==="
+"""
+    
+    script_path = '/tmp/ssh-setup.sh'
+    with open(script_path, 'w') as f:
+        f.write(script)
+    os.chmod(script_path, 0o755)
+    
+    output = run_shell_command(f'bash {script_path}', as_oracle=True)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/ssh/test')
+@login_required
+def api_cluster_ssh_test():
+    """API: Test SSH connectivity"""
+    output = run_shell_command('cat ~/.ssh/authorized_keys 2>/dev/null | wc -l; echo " authorized keys"; ssh -o BatchMode=yes localhost echo "SSH to localhost: OK" 2>/dev/null || echo "SSH to localhost: FAILED"', as_oracle=True)
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/cluster/ssh/distribute', methods=['POST'])
+@login_required
+@admin_required
+def api_cluster_ssh_distribute():
+    """API: Distribute SSH keys"""
+    data = request.json or {}
+    hosts = data.get('hosts', [])
+    
+    output = ''
+    for host in hosts:
+        result = run_shell_command(f'ssh-copy-id -o StrictHostKeyChecking=no oracle@{host} 2>&1 || echo "Failed for {host}"', as_oracle=True)
+        output += f"Host {host}: {result}\n"
+    
+    return jsonify({'success': True, 'output': output})
+
+
+# ============================================================================
+# MISSING SAMPLE DB API ROUTES (referenced by sample.html)
+# ============================================================================
+
+@app.route('/api/sample/status')
+@login_required
+def api_sample_status():
+    """API: Check sample database status"""
+    output = run_sqlplus("SELECT table_name, num_rows FROM all_tables WHERE owner = 'HR' ORDER BY table_name;")
+    return jsonify({'success': True, 'output': output})
+
+
+@app.route('/api/sample/remove', methods=['POST'])
+@login_required
+@admin_required
+def api_sample_remove():
+    """API: Remove sample database objects"""
+    sql = """
+DROP USER hr CASCADE;
+"""
+    output = run_sqlplus(sql)
+    return jsonify({'success': True, 'output': output})
 
 
 # ============================================================================

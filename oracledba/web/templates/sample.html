@@ -189,7 +189,7 @@ Click "Create Sample Database" to begin...
     async function showStatus() {
         appendOutput('Loading database status...');
         
-        const result = await apiCall('/api/sample/create', 'POST', { action: 'status' });
+        const result = await apiCall('/api/sample/status', 'GET');
         
         if (result.success) {
             appendOutput(result.output);
