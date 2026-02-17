@@ -192,8 +192,6 @@ class SystemDetector:
         
         return metrics
 
-detector = SystemDetector()
-
 app = Flask(__name__, 
            template_folder='web/templates',
            static_folder='web/static')
@@ -909,10 +907,24 @@ def api_terminal_execute():
         'ls $ORACLE_HOME', 'ls /u01/app/oracle/oradata',
     ]
     
+    # Reject shell metacharacters to prevent command injection
+    # Allow pipes only in pre-approved ALLOWED_EXACT commands
+    DANGEROUS_CHARS = [';', '&&', '||', '$(', '`', '>', '<', '\n', '\r']
+    has_pipe = '|' in command
+    
     # Security check
+    is_exact = command.strip() in ALLOWED_EXACT
+    if not is_exact:
+        # For non-exact commands, reject ALL shell metacharacters including pipes
+        if has_pipe or any(ch in command for ch in DANGEROUS_CHARS):
+            return jsonify({
+                'success': False,
+                'error': 'Shell metacharacters (;, &&, ||, |, $(), `, >, <) are not allowed in commands.'
+            })
+    
     allowed = any(command.startswith(prefix) for prefix in ALLOWED_PREFIXES)
     if not allowed:
-        allowed = command.strip() in ALLOWED_EXACT
+        allowed = is_exact
     if not allowed:
         # Allow commands starting with common safe utilities
         SAFE_STARTS = ['cat /etc/', 'ls /u01/', 'ls /home/oracle', 'tail ', 'head ', 'grep ']
@@ -1437,7 +1449,7 @@ EXIT;
         uid = -1
         try:
             uid = os.getuid()
-        except:
+        except AttributeError:
             uid = -1
         
         if uid == 0:
@@ -1539,7 +1551,7 @@ def run_shell_command(command, as_oracle=True, timeout=120):
         uid = -1
         try:
             uid = os.getuid()
-        except:
+        except AttributeError:
             uid = -1
         
         if as_oracle and uid == 0:

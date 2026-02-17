@@ -15,14 +15,8 @@ from rich.panel import Panel
 
 console = Console()
 
-# Import modules
-from .modules import install
-from .modules import rman
-from .modules import dataguard
-from .modules import tuning
-from .modules import asm
-from .modules import rac
-from .modules import pdb
+# Note: module imports are lazy (inside command functions) to avoid
+# import errors when optional dependencies are not installed.
 from .modules import flashback
 from .modules import security
 from .modules import nfs

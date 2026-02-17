@@ -21,8 +21,12 @@ class InstallManager:
     def __init__(self, config_file=None):
         self.config = self._load_config(config_file)
         self.scripts_dir = Path(__file__).parent.parent / "scripts"
-        self.log_dir = Path("/var/log/oracledba")
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.log_dir = Path("/var/log/oracledba")
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            self.log_dir = Path("/tmp/oracledba-logs")
+            self.log_dir.mkdir(parents=True, exist_ok=True)
     
     def _load_config(self, config_file):
         """Load configuration from YAML file"""
@@ -68,10 +72,15 @@ class InstallManager:
             # Always set CV_ASSUME_DISTID for Oracle compatibility
             env['CV_ASSUME_DISTID'] = 'OEL7.8'
             
-            # Build command
-            if as_user == 'oracle' and os.geteuid() == 0:
+            # Build command - safe check for geteuid (Windows compat)
+            try:
+                euid = os.geteuid()
+            except AttributeError:
+                euid = -1  # Not on Linux, just run directly
+            
+            if as_user == 'oracle' and euid == 0:
                 cmd = ['su', '-', 'oracle', '-c', f'source ~/.bash_profile && bash {script_path}']
-            elif as_user == 'root' or os.geteuid() != 0:
+            elif as_user == 'root' or euid != 0:
                 cmd = ['bash', str(script_path)]
             else:
                 cmd = ['su', '-', as_user, '-c', f'bash {script_path}']
@@ -332,9 +341,9 @@ lsnrctl start"""
         ]
         
         try:
-            subprocess.run(listener_cmd, check=True, shell=True)
-            rprint("[green]✓[/green] Listener started successfully")
-        except:
+            subprocess.run(listener_cmd, check=True)
+            rprint("[green]\u2713[/green] Listener started successfully")
+        except Exception:
             rprint("[yellow]⚠[/yellow] Listener start had issues, continuing...")
         
         # Create database with DBCA
@@ -362,7 +371,7 @@ dbca -silent -createDatabase \
         ]
         
         try:
-            result = subprocess.run(dbca_cmd, capture_output=True, text=True, shell=True, timeout=1800)
+            result = subprocess.run(dbca_cmd, capture_output=True, text=True, timeout=1800)
             
             if result.returncode == 0 or "100% complete" in result.stdout:
                 rprint("[green]✓[/green] Database created successfully!")
@@ -374,7 +383,7 @@ dbca -silent -createDatabase \
                     "sqlplus -s / as sysdba << 'EOF'\nSET PAGESIZE 0 FEEDBACK OFF\nSELECT 'DB: ' || name || ' - ' || open_mode FROM v\\$database;\nSELECT 'PDB: ' || name || ' - ' || open_mode FROM v\\$pdbs WHERE name != 'PDB\\$SEED';\nEXIT\nEOF"
                 ]
                 
-                verify_result = subprocess.run(verify_cmd, capture_output=True, text=True, shell=True)
+                verify_result = subprocess.run(verify_cmd, capture_output=True, text=True)
                 rprint(verify_result.stdout)
                 
                 return True

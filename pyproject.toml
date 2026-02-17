@@ -70,7 +70,15 @@ include = ["oracledba*"]
 exclude = ["tests*", "docs*"]
 
 [tool.setuptools.package-data]
-oracledba = ["scripts/*.sh", "scripts/*.sql", "configs/*.yaml", "configs/*.yml", "templates/*.j2"]
+oracledba = [
+    "scripts/*.sh",
+    "scripts/*.sql",
+    "configs/*.yaml",
+    "configs/*.yml",
+    "templates/*.j2",
+    "web/templates/*.html",
+    "web/static/**/*",
+]
 
 [tool.black]
 line-length = 100

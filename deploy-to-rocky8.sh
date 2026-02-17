@@ -5,6 +5,10 @@
 # This script deploys and installs the oradb package on a remote Rocky 8 server
 # Server: 178.128.10.67
 # SSH Key: id_rsa
+#
+# Usage:
+#   bash deploy-to-rocky8.sh           # Fresh install (clones repo)
+#   bash deploy-to-rocky8.sh update    # Update existing install (git pull)
 ################################################################################
 
 set -e  # Exit on error
@@ -15,6 +19,7 @@ SSH_KEY="./otherfiles/id_rsa"
 REMOTE_USER="root"
 REPO_URL="https://github.com/ELMRABET-Abdelali/oradb.git"
 INSTALL_DIR="/opt/oradb"
+MODE="${1:-install}"  # install or update
 
 # Colors for output
 RED='\033[0;31m'
@@ -59,32 +64,73 @@ else
     exit 1
 fi
 
-log_info "Starting remote deployment to ${REMOTE_HOST}..."
+log_info "Starting remote deployment to ${REMOTE_HOST} (mode: ${MODE})..."
 
-# Execute remote installation
-ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "${REMOTE_USER}@${REMOTE_HOST}" <<'ENDSSH'
+if [ "$MODE" = "update" ]; then
+    # UPDATE MODE: git pull + reinstall
+    log_info "Running UPDATE mode..."
+    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "${REMOTE_USER}@${REMOTE_HOST}" <<'ENDSSH'
+
+set -e
+echo "=========================================="
+echo "  OraDB UPDATE on Rocky 8"
+echo "=========================================="
+
+cd /opt/oradb || { echo "ERROR: /opt/oradb not found. Run without 'update' first."; exit 1; }
+
+echo ""
+echo "Step 1/3: Pulling latest code..."
+git pull
+echo "Done"
+
+echo ""
+echo "Step 2/3: Reinstalling package..."
+python3.9 -m pip install -e ".[gui]" --quiet
+echo "Done"
+
+echo ""
+echo "Step 3/3: Verifying..."
+oradba --version
+oradba install check 2>/dev/null || echo "(install check requires Oracle environment)"
+
+echo ""
+echo "=========================================="
+echo "  UPDATE COMPLETE"
+echo "=========================================="
+echo ""
+echo "Test with:"
+echo "  oradba --help"
+echo "  oradba install gui"
+echo ""
+
+ENDSSH
+
+else
+    # FRESH INSTALL MODE
+    log_info "Running FRESH INSTALL mode..."
+    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "${REMOTE_USER}@${REMOTE_HOST}" <<'ENDSSH'
 
 set -e
 
 echo "=========================================="
-echo "🚀 OraDB Installation on Rocky 8"
+echo "  OraDB Installation on Rocky 8"
 echo "=========================================="
 
 # Step 1: Update system and install prerequisites
 echo ""
-echo "📦 Step 1/7: Installing prerequisites..."
+echo "Step 1/6: Installing prerequisites..."
 dnf install -y git python39 python39-pip python39-devel gcc make || yum install -y git python39 python39-pip python39-devel gcc make
 
 # Ensure pip is up to date
 python3.9 -m pip install --upgrade pip
 
-echo "✅ Prerequisites installed"
+echo "Prerequisites installed"
 
 # Step 2: Clone repository
 echo ""
-echo "📥 Step 2/7: Cloning oradb repository..."
+echo "Step 2/6: Cloning oradb repository..."
 if [ -d "/opt/oradb" ]; then
-    echo "⚠️  Directory /opt/oradb already exists. Removing..."
+    echo "Directory /opt/oradb already exists. Removing..."
     rm -rf /opt/oradb
 fi
 
@@ -92,48 +138,36 @@ cd /opt
 git clone https://github.com/ELMRABET-Abdelali/oradb.git
 cd oradb
 
-echo "✅ Repository cloned"
+echo "Repository cloned"
 
-# Step 3: Install Python package
+# Step 3: Install Python package (includes GUI dependencies)
 echo ""
-echo "🔧 Step 3/7: Installing oradb package..."
-python3.9 -m pip install -e .
+echo "Step 3/6: Installing oradb package with GUI dependencies..."
+python3.9 -m pip install -e ".[gui]"
 
-echo "✅ Package installed"
+echo "Package installed"
 
-# Step 4: Install GUI dependencies
+# Step 4: Verify installation
 echo ""
-echo "🎨 Step 4/7: Installing GUI dependencies..."
-if [ -f "requirements-gui.txt" ]; then
-    python3.9 -m pip install -r requirements-gui.txt
-    echo "✅ GUI dependencies installed"
-else
-    echo "⚠️  requirements-gui.txt not found, skipping GUI dependencies"
-fi
-
-# Step 5: Verify installation
-echo ""
-echo "✔️  Step 5/7: Verifying installation..."
+echo "Step 4/6: Verifying installation..."
 python3.9 -m oracledba.cli --version
 
 # Add oradba to PATH (create symlink)
-if [ ! -L "/usr/local/bin/oradba" ]; then
-    cat > /usr/local/bin/oradba << 'EOF'
+cat > /usr/local/bin/oradba << 'EOF'
 #!/bin/bash
 python3.9 -m oracledba.cli "$@"
 EOF
-    chmod +x /usr/local/bin/oradba
-    echo "✅ oradba command created in /usr/local/bin"
-fi
+chmod +x /usr/local/bin/oradba
+echo "oradba command created in /usr/local/bin"
 
 # Test command
 oradba --version
 
-echo "✅ Installation verified"
+echo "Installation verified"
 
-# Step 6: Display available commands
+# Step 5: Display available commands
 echo ""
-echo "📚 Step 6/7: Available installation commands..."
+echo "Step 5/6: Available commands..."
 echo ""
 echo "To see all available commands:"
 echo "  oradba --help"
@@ -152,14 +186,17 @@ echo "To start the Web GUI:"
 echo "  oradba install gui                # Start on 0.0.0.0:5000"
 echo "  oradba install gui --port 8080    # Start on custom port"
 echo ""
+echo "To check what's already installed:"
+echo "  oradba install check"
+echo ""
 
-# Step 7: Display next steps
+# Step 6: Display next steps
 echo ""
 echo "=========================================="
-echo "✅ OraDB Installation Complete!"
+echo "  OraDB Installation Complete!"
 echo "=========================================="
 echo ""
-echo "🎯 Next Steps:"
+echo "Next Steps:"
 echo ""
 echo "1. Run system precheck:"
 echo "   oradba precheck"
@@ -178,28 +215,34 @@ echo "4. Start Web GUI (optional):"
 echo "   oradba install gui"
 echo "   Access at: http://178.128.10.67:5000"
 echo ""
-echo "📖 Documentation: /opt/oradb/guide/"
+echo "Documentation: /opt/oradb/guide/"
+echo "Deploy guide: /opt/oradb/DEPLOY_GUIDE.md"
 echo ""
 
 ENDSSH
 
+fi  # end of install/update mode
+
 log_success "Remote deployment completed successfully!"
 echo ""
 echo "=========================================="
-echo "📝 Summary"
+echo "Summary"
 echo "=========================================="
-echo "✅ Package installed on ${REMOTE_HOST}"
-echo "✅ Package location: /opt/oradb"
-echo "✅ Command available: oradba"
+echo "Package installed on ${REMOTE_HOST}"
+echo "Package location: /opt/oradb"
+echo "Command available: oradba"
 echo ""
-echo "🔗 To connect to the server:"
+echo "To connect to the server:"
 echo "   ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST}"
 echo ""
-echo "🚀 To start Oracle installation on the server:"
+echo "To start Oracle installation on the server:"
 echo "   ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST}"
 echo "   oradba install all"
 echo ""
-echo "🌐 To start Web GUI on the server:"
+echo "To start Web GUI on the server:"
 echo "   ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST}"
 echo "   oradba install gui"
+echo ""
+echo "To update after code changes:"
+echo "   bash deploy-to-rocky8.sh update"
 echo ""
