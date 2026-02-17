@@ -353,6 +353,7 @@ lsnrctl start"""
             'su', '-', 'oracle', '-c',
             f"""export CV_ASSUME_DISTID=OEL7.8 && \
 dbca -silent -createDatabase \
+  -templateName General_Purpose.dbc \
   -gdbName {db_config['db_name']} \
   -sid {db_config['sid']} \
   -createAsContainerDatabase true \
@@ -366,7 +367,7 @@ dbca -silent -createDatabase \
   -storageType FS \
   -characterSet AL32UTF8 \
   -nationalCharacterSet AL16UTF16 \
-  -memoryPercentage 40 \
+  -totalMemory 2048 \
   -emConfiguration NONE"""
         ]
         
