@@ -499,7 +499,7 @@ def _load_nodes_data():
 
 def _save_nodes_data(data):
     """Save nodes and storage pools to JSON"""
-    _ensure_infra_files()
+    CONFIG_DIR.mkdir(exist_ok=True, parents=True)
     with open(NODES_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
