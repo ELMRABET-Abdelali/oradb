@@ -3,11 +3,25 @@
 {% block title %}Dashboard - OracleDBA{% endblock %}
 
 {% block content %}
+<style>
+    .dash-updated { color:#6c757d; font-size:.78rem; }
+    .dash-updated .ts { font-weight:600; }
+    /* Smooth highlight when value changes */
+    .val-changed { animation: valFlash .8s ease; }
+    @keyframes valFlash { 0%{background:#fff3cd;} 100%{background:transparent;} }
+    .status-badge, .card-body, .table td { transition: background .3s ease, color .3s ease; }
+</style>
 <div class="container-fluid">
     <div class="row mb-4">
-        <div class="col-12">
-            <h1><i class="fas fa-tachometer-alt"></i> Dashboard</h1>
-            <p class="text-muted">System Overview and Health Status</p>
+        <div class="col-12 d-flex align-items-center justify-content-between">
+            <div>
+                <h1><i class="fas fa-tachometer-alt"></i> Dashboard</h1>
+                <p class="text-muted mb-0">System Overview and Health Status</p>
+            </div>
+            <div class="dash-updated">
+                <i class="fas fa-clock"></i> Last updated: <span class="ts" id="dashTimestamp">-</span>
+                <button class="btn btn-sm btn-outline-secondary ms-2" onclick="refreshStatus();refreshMetrics()"><i class="fas fa-sync-alt"></i></button>
+            </div>
         </div>
     </div>
 
@@ -439,8 +453,34 @@
     // Auto-refresh status every 30 seconds
     setInterval(refreshStatus, 30000);
     
-    // Auto-refresh metrics every 10 seconds
-    setInterval(refreshMetrics, 10000);
+    // Auto-refresh metrics every 15 seconds (was 10 — less flicker)
+    setInterval(refreshMetrics, 15000);
+
+    // Track last values to avoid needless DOM writes
+    const _prevVals = {};
+
+    function smartUpdate(id, newVal) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const cur = el.textContent;
+        if (cur === String(newVal)) return; // no change
+        el.textContent = newVal;
+        el.classList.remove('val-changed');
+        void el.offsetWidth; // force reflow
+        el.classList.add('val-changed');
+    }
+
+    function smartHtml(id, newHtml) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.innerHTML === newHtml) return; // identical — skip
+        el.innerHTML = newHtml;
+    }
+
+    function updateDashTimestamp() {
+        const el = document.getElementById('dashTimestamp');
+        if (el) el.textContent = new Date().toLocaleTimeString();
+    }
     
     async function refreshStatus() {
         const result = await apiCall('/api/system-status');
@@ -460,6 +500,7 @@
             
             // Update timestamp
             document.getElementById('last-update').textContent = formatTimestamp(result.timestamp);
+            updateDashTimestamp();
             
             // Also refresh metrics if database is running
             if (result.checks.database_running) {
@@ -475,23 +516,25 @@
             console.log('No metrics available');
             return;
         }
+
+        updateDashTimestamp();
         
-        // Update process counts
+        // Update process counts — smart (no flicker if unchanged)
         if (metrics.processes) {
-            updateElement('process-count', metrics.processes.count);
+            smartUpdate('process-count', metrics.processes.count);
         }
         
         if (metrics.sessions) {
-            updateElement('session-count', metrics.sessions.count);
+            smartUpdate('session-count', metrics.sessions.count);
         }
         
         // Update file counts
         if (metrics.datafiles !== undefined) {
-            updateElement('datafile-count', metrics.datafiles);
+            smartUpdate('datafile-count', metrics.datafiles);
         }
         
         if (metrics.tempfiles !== undefined) {
-            updateElement('tempfile-count', metrics.tempfiles);
+            smartUpdate('tempfile-count', metrics.tempfiles);
         }
         
         // Update SGA metrics
@@ -508,7 +551,7 @@
             sgaHtml += '</table>';
             
             const sgaEl = document.getElementById('sga-metrics');
-            if (sgaEl) sgaEl.innerHTML = sgaHtml;
+            if (sgaEl) smartHtml('sga-metrics', sgaHtml);
         }
         
         // Update PGA metrics
@@ -525,7 +568,7 @@
             pgaHtml += '</table>';
             
             const pgaEl = document.getElementById('pga-metrics');
-            if (pgaEl) pgaEl.innerHTML = pgaHtml;
+            if (pgaEl) smartHtml('pga-metrics', pgaHtml);
         }
         
         // Update tablespace metrics
@@ -569,22 +612,25 @@
             tsHtml += '</tbody></table>';
             
             const tsEl = document.getElementById('tablespace-metrics');
-            if (tsEl) tsEl.innerHTML = tsHtml;
+            if (tsEl) smartHtml('tablespace-metrics', tsHtml);
         }
     }
     
     function updateElement(elementId, value) {
-        const element = document.getElementById(elementId);
-        if (element) {
-            element.textContent = value;
-        }
+        smartUpdate(elementId, value);
     }
     
     function updateStatus(elementId, condition, trueText, falseText) {
         const element = document.getElementById(elementId);
         const statusClass = condition ? 'status-running' : 'status-stopped';
         const text = condition ? trueText : falseText;
-        element.innerHTML = `<span class="status-badge ${statusClass}">${text}</span>`;
+        const newHtml = '<span class="status-badge ' + statusClass + '">' + text + '</span>';
+        if (element && element.innerHTML !== newHtml) {
+            element.innerHTML = newHtml;
+            element.classList.remove('val-changed');
+            void element.offsetWidth;
+            element.classList.add('val-changed');
+        }
     }
 </script>
 {% endblock %}

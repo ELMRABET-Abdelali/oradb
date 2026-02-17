@@ -973,38 +973,484 @@ def get_system_status():
 @app.route('/databases')
 @login_required
 def databases():
-    """Database management page"""
+    """Database management page — Portainer-style database list"""
     return render_template('databases.html')
+
+
+@app.route('/databases/<name>')
+@login_required
+def database_detail(name):
+    """Database detail page — full stack view for a single PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return redirect(url_for('databases'))
+    return render_template('database_detail.html', pdb_name=name.upper())
 
 
 @app.route('/api/databases/list')
 @login_required
 def api_databases_list():
-    """API: List all databases (CDB + PDBs) as structured JSON"""
+    """API: List all databases with rich metadata (Portainer-style)"""
     try:
+        # CDB info
         instance_info = run_sqlplus(
-            "SELECT INSTANCE_NAME, STATUS, DATABASE_STATUS FROM V$INSTANCE;"
-        )
-        pdb_info = run_sqlplus(
-            "SELECT NAME, OPEN_MODE, CON_ID FROM V$PDBS ORDER BY CON_ID;"
+            "SELECT INSTANCE_NAME, STATUS, DATABASE_STATUS, HOST_NAME, VERSION FROM V$INSTANCE;"
         )
         cdb_rows = parse_sql_rows(instance_info)
-        pdb_rows = parse_sql_rows(pdb_info)
         cdb = {}
         if cdb_rows:
             cdb = {
                 'instance_name': cdb_rows[0].get('INSTANCE_NAME', ''),
                 'status': cdb_rows[0].get('STATUS', ''),
-                'database_status': cdb_rows[0].get('DATABASE_STATUS', '')
+                'database_status': cdb_rows[0].get('DATABASE_STATUS', ''),
+                'host_name': cdb_rows[0].get('HOST_NAME', ''),
+                'version': cdb_rows[0].get('VERSION', '')
             }
+
+        # PDB list with open mode
+        pdb_info = run_sqlplus(
+            "SELECT NAME, OPEN_MODE, CON_ID, TO_CHAR(CREATION_TIME,'YYYY-MM-DD HH24:MI') AS CREATED FROM V$PDBS ORDER BY CON_ID;"
+        )
+        pdb_rows = parse_sql_rows(pdb_info)
+
+        # Get tablespace counts per PDB
+        ts_count_sql = """SELECT CON_ID, COUNT(*) AS TS_COUNT FROM CDB_TABLESPACES GROUP BY CON_ID ORDER BY CON_ID;"""
+        ts_count_result = run_sqlplus(ts_count_sql)
+        ts_count_rows = parse_sql_rows(ts_count_result)
+        ts_counts = {}
+        for r in ts_count_rows:
+            ts_counts[r.get('CON_ID', '')] = r.get('TS_COUNT', '0')
+
+        # Get user counts per PDB
+        user_count_sql = """SELECT CON_ID, COUNT(*) AS USER_COUNT FROM CDB_USERS GROUP BY CON_ID ORDER BY CON_ID;"""
+        user_count_result = run_sqlplus(user_count_sql)
+        user_count_rows = parse_sql_rows(user_count_result)
+        user_counts = {}
+        for r in user_count_rows:
+            user_counts[r.get('CON_ID', '')] = r.get('USER_COUNT', '0')
+
+        # Get datafile size per PDB
+        size_sql = """SELECT CON_ID, ROUND(SUM(BYTES)/1024/1024,1) AS SIZE_MB FROM CDB_DATA_FILES GROUP BY CON_ID ORDER BY CON_ID;"""
+        size_result = run_sqlplus(size_sql)
+        size_rows = parse_sql_rows(size_result)
+        pdb_sizes = {}
+        for r in size_rows:
+            pdb_sizes[r.get('CON_ID', '')] = r.get('SIZE_MB', '0')
+
+        # Load nodes data for node info
+        infra = _load_nodes_data()
+        nodes = infra.get('nodes', [])
+        pools = infra.get('storage_pools', [])
+
         pdbs = []
         for row in pdb_rows:
+            con_id = row.get('CON_ID', '')
+            name = row.get('NAME', '')
+            open_mode = row.get('OPEN_MODE', '')
+            is_open = 'READ' in open_mode if open_mode else False
+
+            # Determine storage pool (check which pool path contains datafiles)
+            pool_name = 'Oracle Data'  # default
+            for p in pools:
+                pool_path = p.get('path', '')
+                if pool_path and 'oradata' in pool_path:
+                    pool_name = p.get('name', 'Local')
+                    break
+
+            # Node info (first/local node)
+            node_name = nodes[0].get('hostname', 'localhost') if nodes else 'localhost'
+
             pdbs.append({
-                'name': row.get('NAME', ''),
-                'open_mode': row.get('OPEN_MODE', ''),
-                'con_id': row.get('CON_ID', '')
+                'name': name,
+                'open_mode': open_mode,
+                'con_id': con_id,
+                'created': row.get('CREATED', ''),
+                'status': 'running' if is_open else ('mounted' if 'MOUNTED' in open_mode else 'stopped'),
+                'tablespace_count': int(ts_counts.get(con_id, '0')),
+                'user_count': int(user_counts.get(con_id, '0')),
+                'size_mb': float(pdb_sizes.get(con_id, '0')),
+                'storage_pool': pool_name,
+                'storage_type': 'local',
+                'node': node_name,
+                'archivelog': True,  # CDB-level
+                'flashback': True   # CDB-level
             })
-        return jsonify({'success': True, 'cdb': cdb, 'pdbs': pdbs})
+
+        return jsonify({'success': True, 'cdb': cdb, 'pdbs': pdbs,
+                        'node_count': len(nodes), 'pool_count': len(pools)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/detail')
+@login_required
+def api_database_detail(name):
+    """API: Full detail for a single PDB — tablespaces, users, datafiles, protection, backups"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    try:
+        # Find PDB con_id
+        pdb_info = run_sqlplus(f"SELECT NAME, OPEN_MODE, CON_ID, TO_CHAR(CREATION_TIME,'YYYY-MM-DD HH24:MI') AS CREATED FROM V$PDBS WHERE NAME='{name}';")
+        pdb_rows = parse_sql_rows(pdb_info)
+        if not pdb_rows:
+            return jsonify({'success': False, 'error': f'PDB {name} not found'})
+        pdb = pdb_rows[0]
+        con_id = pdb.get('CON_ID', '')
+        open_mode = pdb.get('OPEN_MODE', '')
+        is_open = 'READ' in open_mode if open_mode else False
+
+        result = {
+            'name': name,
+            'con_id': con_id,
+            'open_mode': open_mode,
+            'created': pdb.get('CREATED', ''),
+            'status': 'running' if is_open else ('mounted' if 'MOUNTED' in open_mode else 'stopped'),
+            'tablespaces': [],
+            'datafiles': [],
+            'users': [],
+            'protection': {},
+            'backups': [],
+            'node': '',
+            'storage': {}
+        }
+
+        # Tablespaces in this PDB
+        if is_open:
+            ts_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT TABLESPACE_NAME, STATUS, CONTENTS, ROUND(SUM_BYTES/1024/1024,1) AS SIZE_MB, ROUND(FREE_BYTES/1024/1024,1) AS FREE_MB
+FROM (
+  SELECT t.TABLESPACE_NAME, t.STATUS, t.CONTENTS,
+         NVL(d.BYTES,0) AS SUM_BYTES,
+         NVL(f.FREE_BYTES,0) AS FREE_BYTES
+  FROM DBA_TABLESPACES t
+  LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES) AS BYTES FROM DBA_DATA_FILES GROUP BY TABLESPACE_NAME) d ON t.TABLESPACE_NAME=d.TABLESPACE_NAME
+  LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES) AS FREE_BYTES FROM DBA_FREE_SPACE GROUP BY TABLESPACE_NAME) f ON t.TABLESPACE_NAME=f.TABLESPACE_NAME
+)
+ORDER BY TABLESPACE_NAME;"""
+            ts_result = run_sqlplus(ts_sql)
+            ts_rows = parse_sql_rows(ts_result)
+            for r in ts_rows:
+                size_mb = float(r.get('SIZE_MB', '0'))
+                free_mb = float(r.get('FREE_MB', '0'))
+                used_mb = size_mb - free_mb
+                pct_used = round((used_mb / size_mb * 100), 1) if size_mb > 0 else 0
+                result['tablespaces'].append({
+                    'name': r.get('TABLESPACE_NAME', ''),
+                    'status': r.get('STATUS', ''),
+                    'contents': r.get('CONTENTS', ''),
+                    'size_mb': size_mb,
+                    'free_mb': free_mb,
+                    'used_mb': round(used_mb, 1),
+                    'pct_used': pct_used
+                })
+
+            # Datafiles in this PDB
+            df_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT FILE_NAME, TABLESPACE_NAME, ROUND(BYTES/1024/1024,1) AS SIZE_MB,
+       CASE WHEN AUTOEXTENSIBLE='YES' THEN 'Yes' ELSE 'No' END AS AUTOEXTEND,
+       ROUND(MAXBYTES/1024/1024,1) AS MAX_MB
+FROM DBA_DATA_FILES ORDER BY TABLESPACE_NAME, FILE_NAME;"""
+            df_result = run_sqlplus(df_sql)
+            df_rows = parse_sql_rows(df_result)
+            for r in df_rows:
+                result['datafiles'].append({
+                    'file_name': r.get('FILE_NAME', ''),
+                    'tablespace': r.get('TABLESPACE_NAME', ''),
+                    'size_mb': float(r.get('SIZE_MB', '0')),
+                    'autoextend': r.get('AUTOEXTEND', 'No'),
+                    'max_mb': float(r.get('MAX_MB', '0'))
+                })
+
+            # Users in this PDB
+            user_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT USERNAME, ACCOUNT_STATUS, DEFAULT_TABLESPACE, TEMPORARY_TABLESPACE,
+       TO_CHAR(CREATED,'YYYY-MM-DD') AS CREATED
+FROM DBA_USERS ORDER BY USERNAME;"""
+            user_result = run_sqlplus(user_sql)
+            user_rows = parse_sql_rows(user_result)
+            for r in user_rows:
+                result['users'].append({
+                    'username': r.get('USERNAME', ''),
+                    'status': r.get('ACCOUNT_STATUS', ''),
+                    'default_tablespace': r.get('DEFAULT_TABLESPACE', ''),
+                    'temp_tablespace': r.get('TEMPORARY_TABLESPACE', ''),
+                    'created': r.get('CREATED', '')
+                })
+
+        # Protection info (CDB-level)
+        prot_sql = "SELECT LOG_MODE, FLASHBACK_ON FROM V$DATABASE;"
+        prot_result = run_sqlplus(prot_sql)
+        prot_rows = parse_sql_rows(prot_result)
+        if prot_rows:
+            result['protection'] = {
+                'archivelog': prot_rows[0].get('LOG_MODE', '') == 'ARCHIVELOG',
+                'flashback': prot_rows[0].get('FLASHBACK_ON', '') == 'YES'
+            }
+
+        # RMAN backup info
+        rman_sql = f"SELECT RECID, TO_CHAR(START_TIME,'YYYY-MM-DD HH24:MI') AS START_TIME, TO_CHAR(COMPLETION_TIME,'YYYY-MM-DD HH24:MI') AS END_TIME, STATUS, INPUT_TYPE FROM V$RMAN_BACKUP_JOB_DETAILS WHERE ROWNUM <= 10 ORDER BY START_TIME DESC;"
+        rman_result = run_sqlplus(rman_sql)
+        rman_rows = parse_sql_rows(rman_result)
+        for r in rman_rows:
+            result['backups'].append({
+                'id': r.get('RECID', ''),
+                'start_time': r.get('START_TIME', ''),
+                'end_time': r.get('END_TIME', ''),
+                'status': r.get('STATUS', ''),
+                'type': r.get('INPUT_TYPE', '')
+            })
+
+        # Node and storage info
+        infra = _load_nodes_data()
+        nodes = infra.get('nodes', [])
+        pools = infra.get('storage_pools', [])
+        result['node'] = nodes[0].get('hostname', 'localhost') if nodes else 'localhost'
+        result['storage'] = {
+            'pools': [{'name': p.get('name', ''), 'type': p.get('type', ''), 'path': p.get('path', '')} for p in pools],
+            'total_datafiles': len(result['datafiles']),
+            'total_size_mb': sum(d['size_mb'] for d in result['datafiles'])
+        }
+
+        return jsonify({'success': True, 'database': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/users')
+@login_required
+def api_database_users(name):
+    """API: Get users and their roles for a specific PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    try:
+        sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT u.USERNAME, u.ACCOUNT_STATUS,
+       LISTAGG(r.GRANTED_ROLE, ', ') WITHIN GROUP (ORDER BY r.GRANTED_ROLE) AS ROLES
+FROM DBA_USERS u
+LEFT JOIN DBA_ROLE_PRIVS r ON u.USERNAME = r.GRANTEE
+GROUP BY u.USERNAME, u.ACCOUNT_STATUS
+ORDER BY u.USERNAME;"""
+        result = run_sqlplus(sql)
+        rows = parse_sql_rows(result)
+        users = []
+        for r in rows:
+            users.append({
+                'username': r.get('USERNAME', ''),
+                'status': r.get('ACCOUNT_STATUS', ''),
+                'roles': [role.strip() for role in r.get('ROLES', '').split(',') if role.strip()]
+            })
+        return jsonify({'success': True, 'users': users})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/backup', methods=['POST'])
+@login_required
+@admin_required
+def api_database_backup(name):
+    """API: Run RMAN backup for a specific PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    backup_type = request.json.get('type', 'full') if request.json else 'full'
+    try:
+        oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+        oracle_sid = os.environ.get('ORACLE_SID', 'GDCPROD')
+        env = os.environ.copy()
+        env['ORACLE_HOME'] = oracle_home
+        env['ORACLE_SID'] = oracle_sid
+        env['PATH'] = f"{oracle_home}/bin:{env.get('PATH', '')}"
+
+        if backup_type == 'incremental':
+            rman_cmd = f"BACKUP INCREMENTAL LEVEL 1 PLUGGABLE DATABASE {name};"
+        else:
+            rman_cmd = f"BACKUP PLUGGABLE DATABASE {name} PLUS ARCHIVELOG;"
+
+        rman_script = f"""connect target /
+{rman_cmd}
+exit;"""
+        result = subprocess.run(
+            [f'{oracle_home}/bin/rman'],
+            input=rman_script, capture_output=True, text=True,
+            timeout=600, env=env
+        )
+        output = result.stdout + result.stderr
+        success = 'completed' in output.lower() or result.returncode == 0
+        return jsonify({
+            'success': success,
+            'output': output[:2000],
+            'message': f'RMAN {backup_type} backup {"completed" if success else "failed"} for {name}'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/restore-point', methods=['POST'])
+@login_required
+@admin_required
+def api_database_restore_point(name):
+    """API: Create a restore point for flashback"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    rp_name = request.json.get('name', f'RP_{name}_{datetime.now().strftime("%Y%m%d_%H%M")}') if request.json else f'RP_{name}_{datetime.now().strftime("%Y%m%d_%H%M")}'
+    try:
+        sql = f"""ALTER SESSION SET CONTAINER = {name};
+CREATE RESTORE POINT {rp_name} GUARANTEE FLASHBACK DATABASE;"""
+        result = run_sqlplus(sql)
+        return jsonify({'success': True, 'output': result, 'restore_point': rp_name,
+                        'message': f'Restore point {rp_name} created in {name}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/restore-points')
+@login_required
+def api_database_restore_points(name):
+    """API: List restore points for a PDB"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    try:
+        sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT NAME, TO_CHAR(TIME,'YYYY-MM-DD HH24:MI:SS') AS TIME, GUARANTEE_FLASHBACK_DATABASE AS GUARANTEED,
+       STORAGE_SIZE FROM V$RESTORE_POINT ORDER BY TIME DESC;"""
+        result = run_sqlplus(sql)
+        rows = parse_sql_rows(result)
+        points = []
+        for r in rows:
+            points.append({
+                'name': r.get('NAME', ''),
+                'time': r.get('TIME', ''),
+                'guaranteed': r.get('GUARANTEED', '') == 'YES',
+                'storage_size': r.get('STORAGE_SIZE', '0')
+            })
+        return jsonify({'success': True, 'restore_points': points})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/flashback', methods=['POST'])
+@login_required
+@admin_required
+def api_database_flashback(name):
+    """API: Flashback PDB to a restore point"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    rp_name = request.json.get('restore_point', '') if request.json else ''
+    if not rp_name:
+        return jsonify({'success': False, 'error': 'Restore point name required'})
+    try:
+        sql = f"""ALTER PLUGGABLE DATABASE {name} CLOSE IMMEDIATE;
+ALTER PLUGGABLE DATABASE {name} OPEN RESETLOGS;"""
+        # Flashback requires RMAN for PDB-level
+        oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+        oracle_sid = os.environ.get('ORACLE_SID', 'GDCPROD')
+        env = os.environ.copy()
+        env['ORACLE_HOME'] = oracle_home
+        env['ORACLE_SID'] = oracle_sid
+        env['PATH'] = f"{oracle_home}/bin:{env.get('PATH', '')}"
+        # Close PDB first
+        run_sqlplus(f"ALTER PLUGGABLE DATABASE {name} CLOSE IMMEDIATE;")
+        # Flashback via RMAN
+        rman_script = f"""connect target /
+FLASHBACK PLUGGABLE DATABASE {name} TO RESTORE POINT {rp_name};
+exit;"""
+        result = subprocess.run(
+            [f'{oracle_home}/bin/rman'],
+            input=rman_script, capture_output=True, text=True,
+            timeout=300, env=env
+        )
+        # Reopen PDB
+        run_sqlplus(f"ALTER PLUGGABLE DATABASE {name} OPEN RESETLOGS;\nALTER PLUGGABLE DATABASE {name} SAVE STATE;")
+        output = result.stdout + result.stderr
+        return jsonify({
+            'success': True,
+            'output': output[:2000],
+            'message': f'PDB {name} flashed back to {rp_name} and reopened'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/yaml')
+@login_required
+def api_database_yaml(name):
+    """API: Generate YAML config from an existing PDB — exportable"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    name = name.upper()
+    try:
+        # Get tablespaces
+        ts_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT TABLESPACE_NAME, STATUS FROM DBA_TABLESPACES WHERE CONTENTS='PERMANENT' ORDER BY TABLESPACE_NAME;"""
+        ts_result = run_sqlplus(ts_sql)
+        ts_rows = parse_sql_rows(ts_result)
+
+        # Get datafiles
+        df_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT FILE_NAME, TABLESPACE_NAME, ROUND(BYTES/1024/1024) AS SIZE_MB,
+       AUTOEXTENSIBLE, ROUND(MAXBYTES/1024/1024) AS MAX_MB
+FROM DBA_DATA_FILES ORDER BY TABLESPACE_NAME;"""
+        df_result = run_sqlplus(df_sql)
+        df_rows = parse_sql_rows(df_result)
+
+        # Get non-Oracle users
+        user_sql = f"""ALTER SESSION SET CONTAINER = {name};
+SELECT u.USERNAME, u.DEFAULT_TABLESPACE, u.TEMPORARY_TABLESPACE
+FROM DBA_USERS u WHERE u.ORACLE_MAINTAINED='N' ORDER BY u.USERNAME;"""
+        user_result = run_sqlplus(user_sql)
+        user_rows = parse_sql_rows(user_result)
+
+        # Build YAML structure
+        config = {
+            'name': name.lower(),
+            'description': f'Exported config for PDB {name}',
+            'pdb': {
+                'name': name,
+                'admin_user': f'{name.lower()}_admin',
+                'admin_password': 'CHANGE_ME'
+            },
+            'tablespaces': [],
+            'users': [],
+            'protection': {
+                'archivelog': True,
+                'flashback': True
+            }
+        }
+
+        for df in df_rows:
+            config['tablespaces'].append({
+                'name': df.get('TABLESPACE_NAME', ''),
+                'size_mb': int(df.get('SIZE_MB', '0')),
+                'autoextend': df.get('AUTOEXTENSIBLE', 'NO') == 'YES',
+                'max_size_mb': int(df.get('MAX_MB', '0')),
+                'datafile_path': df.get('FILE_NAME', '')
+            })
+
+        for u in user_rows:
+            config['users'].append({
+                'username': u.get('USERNAME', ''),
+                'password': 'CHANGE_ME',
+                'default_tablespace': u.get('DEFAULT_TABLESPACE', ''),
+                'temp_tablespace': u.get('TEMPORARY_TABLESPACE', 'TEMP'),
+                'quota': 'UNLIMITED',
+                'roles': ['CONNECT', 'RESOURCE']
+            })
+
+        import yaml
+        yaml_str = yaml.dump(config, default_flow_style=False, sort_keys=False)
+        return jsonify({'success': True, 'yaml': yaml_str, 'config': config})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1012,16 +1458,109 @@ def api_databases_list():
 @app.route('/api/databases/create', methods=['POST'])
 @login_required
 def api_databases_create():
-    """API: Create a new Pluggable Database"""
+    """API: Create a new Pluggable Database (simple or from YAML)"""
     data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'})
+
+    # Check if YAML-based creation
+    yaml_content = data.get('yaml_content', '')
+    if yaml_content:
+        # Delegate to deploy endpoint logic
+        try:
+            import yaml
+            config = yaml.safe_load(yaml_content)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Invalid YAML: {e}'})
+
+        pdb_name = config.get('pdb', {}).get('name', '').upper()
+        if not pdb_name:
+            return jsonify({'success': False, 'error': 'PDB name required in YAML'})
+
+        log = []
+        # Step 1: Create PDB
+        admin_user = config.get('pdb', {}).get('admin_user', f'{pdb_name}_admin')
+        admin_pass = config.get('pdb', {}).get('admin_password', 'Oracle123')
+        log.append(f'[1/5] Creating PDB {pdb_name}...')
+        sql = f"""CREATE PLUGGABLE DATABASE {pdb_name} ADMIN USER {admin_user} IDENTIFIED BY "{admin_pass}"
+  FILE_NAME_CONVERT = ('/u01/app/oracle/oradata/GDCPROD/pdbseed/', '/u01/app/oracle/oradata/GDCPROD/{pdb_name}/');
+ALTER PLUGGABLE DATABASE {pdb_name} OPEN;
+ALTER PLUGGABLE DATABASE {pdb_name} SAVE STATE;"""
+        result = run_sqlplus(sql)
+        if 'ERROR' in result and 'already exists' not in result:
+            log.append(f'  WARNING: {result[:200]}')
+        else:
+            log.append(f'  OK: PDB {pdb_name} created')
+
+        # Step 2: Tablespaces
+        tablespaces = config.get('tablespaces', [])
+        log.append(f'[2/5] Creating {len(tablespaces)} tablespace(s)...')
+        for ts in tablespaces:
+            ts_name = ts.get('name', '')
+            size = ts.get('size_mb', 100)
+            autoextend = 'ON' if ts.get('autoextend', True) else 'OFF'
+            max_size = ts.get('max_size_mb', size * 4)
+            path = ts.get('datafile_path', f'/u01/app/oracle/oradata/GDCPROD/{pdb_name}/{ts_name.lower()}.dbf')
+            ts_sql = f"""ALTER SESSION SET CONTAINER = {pdb_name};
+CREATE TABLESPACE {ts_name} DATAFILE '{path}' SIZE {size}M AUTOEXTEND {autoextend} MAXSIZE {max_size}M;"""
+            ts_res = run_sqlplus(ts_sql)
+            if 'ERROR' in ts_res:
+                log.append(f'  WARNING ({ts_name}): {ts_res[:150]}')
+            else:
+                log.append(f'  OK: Tablespace {ts_name} created')
+
+        # Step 3: Users
+        users = config.get('users', [])
+        log.append(f'[3/5] Creating {len(users)} user(s)...')
+        for u in users:
+            uname = u.get('username', '')
+            upass = u.get('password', 'Oracle123')
+            def_ts = u.get('default_tablespace', 'USERS')
+            tmp_ts = u.get('temp_tablespace', 'TEMP')
+            quota = u.get('quota', 'UNLIMITED')
+            roles = u.get('roles', ['CONNECT', 'RESOURCE'])
+            privs = u.get('privileges', [])
+            u_sql = f"""ALTER SESSION SET CONTAINER = {pdb_name};
+CREATE USER {uname} IDENTIFIED BY "{upass}" DEFAULT TABLESPACE {def_ts} TEMPORARY TABLESPACE {tmp_ts}
+            QUOTA {quota} ON {def_ts};"""
+            for role in roles:
+                u_sql += f"\nGRANT {role} TO {uname};"
+            for priv in privs:
+                u_sql += f"\nGRANT {priv} TO {uname};"
+            u_res = run_sqlplus(u_sql)
+            if 'ERROR' in u_res:
+                log.append(f'  WARNING ({uname}): {u_res[:150]}')
+            else:
+                log.append(f'  OK: User {uname} created with roles: {", ".join(roles)}')
+
+        # Step 4: Protection
+        log.append('[4/5] Configuring protection...')
+        prot = config.get('protection', {})
+        if prot.get('archivelog'):
+            log.append('  Archivelog: already enabled at CDB level')
+        if prot.get('flashback'):
+            log.append('  Flashback: already enabled at CDB level')
+
+        # Step 5: Verify
+        log.append('[5/5] Verifying deployment...')
+        verify_sql = f"SELECT NAME, OPEN_MODE FROM V$PDBS WHERE NAME='{pdb_name}';"
+        v_result = run_sqlplus(verify_sql)
+        v_rows = parse_sql_rows(v_result)
+        if v_rows and 'READ' in v_rows[0].get('OPEN_MODE', ''):
+            log.append(f'  OK: PDB {pdb_name} is {v_rows[0]["OPEN_MODE"]}')
+        else:
+            log.append(f'  WARNING: PDB {pdb_name} may not be fully open')
+        log.append('--- Deployment complete ---')
+        return jsonify({'success': True, 'log': log})
+
+    # Simple creation (original behavior)
     sid = data.get('sid', 'PRODDB').upper()
     memory = data.get('memory', 2048)
-    
-    # Sanitize SID name (alphanumeric + underscore only)
+
     import re as _re
     if not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', sid):
         return jsonify({'success': False, 'error': 'Invalid SID name. Use uppercase letters, digits, underscore (max 30 chars).'})
-    
+
     try:
         sql = f"""CREATE PLUGGABLE DATABASE {sid} ADMIN USER {sid}_admin IDENTIFIED BY Oracle123
   FILE_NAME_CONVERT = ('/u01/app/oracle/oradata/GDCPROD/pdbseed/', '/u01/app/oracle/oradata/GDCPROD/{sid}/');

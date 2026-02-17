@@ -3,121 +3,272 @@
 {% block title %}Databases - OracleDBA{% endblock %}
 
 {% block content %}
+<style>
+    .db-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
+    .db-header h1 { margin:0; font-size:1.6rem; }
+    .db-header .subtitle { color:#6c757d; font-size:.9rem; }
+    .cdb-bar { background:linear-gradient(135deg,#1a1a2e,#16213e); color:#fff; border-radius:10px; padding:1rem 1.5rem; margin-bottom:1.5rem; display:flex; align-items:center; gap:2rem; flex-wrap:wrap; }
+    .cdb-bar .cdb-name { font-size:1.3rem; font-weight:700; }
+    .cdb-bar .cdb-meta { font-size:.85rem; opacity:.8; }
+    .cdb-stat { text-align:center; min-width:70px; }
+    .cdb-stat .num { font-size:1.5rem; font-weight:700; }
+    .cdb-stat .lbl { font-size:.7rem; text-transform:uppercase; opacity:.7; }
+
+    /* Action bar like Portainer */
+    .action-bar { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:.75rem 1rem; margin-bottom:1rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+    .action-bar .btn { font-size:.8rem; padding:.3rem .75rem; }
+
+    /* Database table */
+    .db-table { width:100%; border-collapse:separate; border-spacing:0; }
+    .db-table th { background:#f1f3f5; padding:.6rem .8rem; font-size:.75rem; text-transform:uppercase; font-weight:600; color:#6c757d; border-bottom:2px solid #dee2e6; white-space:nowrap; }
+    .db-table td { padding:.7rem .8rem; border-bottom:1px solid #eee; vertical-align:middle; }
+    .db-table tr:hover { background:#f8f9fa; }
+    .db-table .db-name { font-weight:600; color:#0d6efd; cursor:pointer; text-decoration:none; }
+    .db-table .db-name:hover { text-decoration:underline; }
+    .status-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:12px; font-size:.75rem; font-weight:600; }
+    .status-pill.running { background:#d4edda; color:#155724; }
+    .status-pill.mounted { background:#fff3cd; color:#856404; }
+    .status-pill.stopped { background:#f8d7da; color:#721c24; }
+    .status-pill.seed { background:#e2e3e5; color:#383d41; }
+    .status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .status-dot.running { background:#28a745; }
+    .status-dot.mounted { background:#ffc107; }
+    .status-dot.stopped { background:#dc3545; }
+    .status-dot.seed { background:#6c757d; }
+
+    /* Resource icons row */
+    .res-icons { display:flex; gap:.6rem; flex-wrap:wrap; }
+    .res-icon { display:inline-flex; align-items:center; gap:4px; font-size:.75rem; color:#495057; background:#e9ecef; padding:2px 8px; border-radius:10px; cursor:pointer; text-decoration:none; transition:all .2s; }
+    .res-icon:hover { background:#0d6efd; color:#fff; }
+    .res-icon i { font-size:.7rem; }
+
+    /* Quick actions */
+    .quick-actions { display:flex; gap:2px; }
+    .quick-actions .btn { padding:4px 8px; font-size:.7rem; border-radius:4px; }
+
+    /* Wizard modal */
+    .wizard-steps { display:flex; gap:0; margin-bottom:1.5rem; }
+    .wizard-step { flex:1; text-align:center; padding:.6rem; background:#e9ecef; position:relative; font-size:.8rem; font-weight:500; color:#6c757d; }
+    .wizard-step.active { background:#0d6efd; color:#fff; }
+    .wizard-step.done { background:#28a745; color:#fff; }
+    .wizard-step:first-child { border-radius:8px 0 0 8px; }
+    .wizard-step:last-child { border-radius:0 8px 8px 0; }
+    .wizard-step .step-num { font-weight:700; }
+    .wizard-panel { display:none; }
+    .wizard-panel.active { display:block; }
+    .yaml-preview { background:#1e1e1e; color:#d4d4d4; font-family:'Courier New',monospace; font-size:.8rem; padding:1rem; border-radius:8px; max-height:300px; overflow-y:auto; white-space:pre-wrap; }
+    .deploy-log { background:#0d1117; color:#c9d1d9; font-family:'Courier New',monospace; font-size:.78rem; padding:1rem; border-radius:8px; max-height:250px; overflow-y:auto; }
+    .deploy-log .ok { color:#3fb950; }
+    .deploy-log .warn { color:#d29922; }
+    .deploy-log .step { color:#58a6ff; font-weight:700; }
+
+    /* Filter bar */
+    .filter-bar { display:flex; align-items:center; gap:1rem; margin-bottom:.5rem; }
+    .filter-bar input { max-width:250px; }
+    .filter-bar select { max-width:160px; }
+</style>
+
 <div class="container-fluid">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h1><i class="fas fa-database"></i> Database Management</h1>
-            <p class="text-muted">Create and manage Oracle databases</p>
+    <!-- Header -->
+    <div class="db-header">
+        <div>
+            <h1><i class="fas fa-database"></i> Database list <button class="btn btn-sm btn-link p-0 ms-2" onclick="loadDatabases()" title="Refresh"><i class="fas fa-sync-alt"></i></button></h1>
+            <span class="subtitle">Databases</span>
         </div>
     </div>
 
-    <!-- Create Database -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <i class="fas fa-plus"></i> Create New Database
+    <!-- CDB Instance Bar -->
+    <div class="cdb-bar" id="cdbBar">
+        <div>
+            <div class="cdb-name"><i class="fas fa-server"></i> <span id="cdbName">Loading...</span></div>
+            <div class="cdb-meta" id="cdbMeta"></div>
+        </div>
+        <div class="cdb-stat"><div class="num" id="statPdbs">-</div><div class="lbl">Databases</div></div>
+        <div class="cdb-stat"><div class="num" id="statRunning">-</div><div class="lbl">Running</div></div>
+        <div class="cdb-stat"><div class="num" id="statStopped">-</div><div class="lbl">Stopped</div></div>
+        <div class="cdb-stat"><div class="num" id="statNodes">-</div><div class="lbl">Nodes</div></div>
+        <div class="cdb-stat"><div class="num" id="statPools">-</div><div class="lbl">Pools</div></div>
+    </div>
+
+    <!-- Action Bar (Portainer-style) -->
+    <div class="action-bar">
+        <button class="btn btn-success" onclick="pdbActionSelected('open')"><i class="fas fa-play"></i> Start</button>
+        <button class="btn btn-warning" onclick="pdbActionSelected('close')"><i class="fas fa-stop"></i> Stop</button>
+        <button class="btn btn-danger" onclick="pdbActionSelected('drop')"><i class="fas fa-skull-crossbones"></i> Remove</button>
+        <div class="vr mx-1"></div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createWizard"><i class="fas fa-plus"></i> Create database</button>
+        <button class="btn btn-outline-secondary" onclick="exportSelected()"><i class="fas fa-file-export"></i> Export YAML</button>
+    </div>
+
+    <!-- Filter / Search -->
+    <div class="filter-bar">
+        <div class="input-group input-group-sm" style="max-width:260px;">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input type="text" class="form-control" id="searchInput" placeholder="Search..." oninput="filterTable()">
+        </div>
+        <select class="form-select form-select-sm" id="statusFilter" onchange="filterTable()">
+            <option value="">All states</option>
+            <option value="running">Running</option>
+            <option value="mounted">Mounted</option>
+            <option value="stopped">Stopped</option>
+        </select>
+        <span class="text-muted ms-auto" style="font-size:.8rem;" id="filterInfo"></span>
+    </div>
+
+    <!-- Database Table -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="db-table" id="dbTable">
+                    <thead>
+                        <tr>
+                            <th style="width:30px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                            <th>Name</th>
+                            <th>State</th>
+                            <th>Quick actions</th>
+                            <th>Resources</th>
+                            <th>Storage</th>
+                            <th>Created</th>
+                            <th>Node</th>
+                            <th>Size</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dbTableBody">
+                        <tr><td colspan="9" class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin"></i> Loading databases...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deploy Log (hidden until action) -->
+    <div class="card mt-3 border-0 shadow-sm" id="logCard" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-terminal"></i> Action Log</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('logCard').style.display='none'"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="card-body p-0">
+            <div class="deploy-log" id="actionLog"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= CREATE WIZARD MODAL ========================= -->
+<div class="modal fade" id="createWizard" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-magic"></i> Create Database &mdash; Provisioning Wizard</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Steps indicator -->
+                <div class="wizard-steps">
+                    <div class="wizard-step active" id="ws1"><span class="step-num">1</span> PDB</div>
+                    <div class="wizard-step" id="ws2"><span class="step-num">2</span> Tablespaces</div>
+                    <div class="wizard-step" id="ws3"><span class="step-num">3</span> Users</div>
+                    <div class="wizard-step" id="ws4"><span class="step-num">4</span> Protection</div>
+                    <div class="wizard-step" id="ws5"><span class="step-num">5</span> Review &amp; Deploy</div>
                 </div>
-                <div class="card-body">
-                    <form id="createDbForm" onsubmit="createDatabase(event)">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="mb-3">
-                                    <label class="form-label">Database SID</label>
-                                    <input type="text" class="form-control" id="dbSid" value="PRODDB" required>
-                                    <small class="text-muted">Unique identifier (e.g., PRODDB, TESTDB)</small>
-                                </div>
+
+                <!-- Step 1: PDB Name -->
+                <div class="wizard-panel active" id="wp1">
+                    <h6>Pluggable Database</h6>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">PDB Name</label>
+                            <input type="text" class="form-control" id="wPdbName" value="NEWDB" placeholder="e.g. PRODDB">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Admin User</label>
+                            <input type="text" class="form-control" id="wAdminUser" value="newdb_admin">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Admin Password</label>
+                            <input type="password" class="form-control" id="wAdminPass" value="Oracle123">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Storage Pool</label>
+                            <select class="form-select" id="wPool">
+                                <option value="/u01/app/oracle/oradata/GDCPROD">Oracle Data (local)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Tablespaces -->
+                <div class="wizard-panel" id="wp2">
+                    <h6>Tablespaces <button class="btn btn-sm btn-outline-primary float-end" onclick="addTsRow()"><i class="fas fa-plus"></i> Add</button></h6>
+                    <div id="tsRows">
+                        <div class="row g-2 mb-2 ts-row">
+                            <div class="col-md-3"><input type="text" class="form-control form-control-sm" placeholder="Name" value="APP_DATA"></div>
+                            <div class="col-md-2"><input type="number" class="form-control form-control-sm" placeholder="Size MB" value="100"></div>
+                            <div class="col-md-2">
+                                <select class="form-select form-select-sm"><option value="true" selected>Autoextend</option><option value="false">Fixed</option></select>
                             </div>
-                            <div class="col-md-4">
-                                <div class="mb-3">
-                                    <label class="form-label">Memory (MB)</label>
-                                    <input type="number" class="form-control" id="dbMemory" value="2048" min="1024" required>
-                                    <small class="text-muted">Minimum 1024 MB recommended</small>
-                                </div>
+                            <div class="col-md-2"><input type="number" class="form-control form-control-sm" placeholder="Max MB" value="500"></div>
+                            <div class="col-md-3"><button class="btn btn-sm btn-outline-danger" onclick="this.closest('.ts-row').remove()"><i class="fas fa-trash"></i></button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Users -->
+                <div class="wizard-panel" id="wp3">
+                    <h6>Users <button class="btn btn-sm btn-outline-primary float-end" onclick="addUserRow()"><i class="fas fa-plus"></i> Add</button></h6>
+                    <div id="userRows">
+                        <div class="row g-2 mb-2 user-row">
+                            <div class="col-md-3"><input type="text" class="form-control form-control-sm" placeholder="Username" value="APP_USER"></div>
+                            <div class="col-md-2"><input type="password" class="form-control form-control-sm" placeholder="Password" value="AppUser123"></div>
+                            <div class="col-md-2">
+                                <select class="form-select form-select-sm"><option>CONNECT</option><option selected>RESOURCE</option><option>DBA</option></select>
                             </div>
-                            <div class="col-md-4">
-                                <div class="mb-3">
-                                    <label class="form-label">Character Set</label>
-                                    <select class="form-select" id="dbCharset">
-                                        <option value="AL32UTF8" selected>AL32UTF8 (UTF-8)</option>
-                                        <option value="WE8ISO8859P1">WE8ISO8859P1 (Western European)</option>
-                                    </select>
-                                </div>
+                            <div class="col-md-2"><input type="text" class="form-control form-control-sm" placeholder="Tablespace" value="APP_DATA"></div>
+                            <div class="col-md-3"><button class="btn btn-sm btn-outline-danger" onclick="this.closest('.user-row').remove()"><i class="fas fa-trash"></i></button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Protection -->
+                <div class="wizard-panel" id="wp4">
+                    <h6>Protection &amp; Backup</h6>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="wArchivelog" checked disabled>
+                                <label class="form-check-label">ARCHIVELOG (CDB-level, enabled)</label>
+                            </div>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="wFlashback" checked disabled>
+                                <label class="form-check-label">Flashback (CDB-level, enabled)</label>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-plus"></i> Create Database
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- CDB Instance Info -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card border-primary">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-server"></i> CDB Instance</span>
-                    <button class="btn btn-sm btn-light" onclick="loadDatabases()">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-                <div class="card-body" id="cdbInfo">
-                    <div class="text-center text-muted py-2">
-                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="wBackupEnable" checked>
+                                <label class="form-check-label">Schedule RMAN backup</label>
+                            </div>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="wRestorePoint" checked>
+                                <label class="form-check-label">Create initial restore point</label>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- PDB List Table -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-cubes"></i> Pluggable Databases</span>
-                    <span class="badge bg-info" id="pdbCount">0</span>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0" id="pdbTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Open Mode</th>
-                                    <th>CON_ID</th>
-                                    <th>Status</th>
-                                    <th class="text-end">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="pdbTableBody">
-                                <tr><td colspan="5" class="text-center text-muted py-4">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading...
-                                </td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                <!-- Step 5: Review & Deploy -->
+                <div class="wizard-panel" id="wp5">
+                    <h6>Review YAML Configuration
+                        <button class="btn btn-sm btn-outline-secondary float-end ms-2" onclick="downloadYaml()"><i class="fas fa-download"></i> Download YAML</button>
+                        <button class="btn btn-sm btn-outline-secondary float-end" onclick="copyYaml()"><i class="fas fa-copy"></i> Copy</button>
+                    </h6>
+                    <div class="yaml-preview" id="yamlPreview"></div>
+                    <div class="deploy-log mt-3" id="wizardLog" style="display:none;"></div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Action Log -->
-    <div class="row">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-history"></i> Action Log</span>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('dbOutput').textContent='Ready.'">
-                        <i class="fas fa-eraser"></i> Clear
-                    </button>
-                </div>
-                <div class="card-body">
-                    <div class="terminal-output" id="dbOutput" style="max-height:200px">Ready to manage databases...</div>
-                </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="wizPrev" onclick="wizardNav(-1)" style="display:none"><i class="fas fa-arrow-left"></i> Back</button>
+                <button class="btn btn-primary" id="wizNext" onclick="wizardNav(1)">Next <i class="fas fa-arrow-right"></i></button>
+                <button class="btn btn-success" id="wizDeploy" onclick="wizardDeploy()" style="display:none"><i class="fas fa-rocket"></i> Deploy</button>
             </div>
         </div>
     </div>
@@ -126,93 +277,286 @@
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', loadDatabases);
-    
-    async function loadDatabases() {
-        const result = await apiCall('/api/databases/list');
-        if (!result.success) {
-            document.getElementById('cdbInfo').innerHTML = `<div class="alert alert-danger mb-0">${result.error}</div>`;
-            document.getElementById('pdbTableBody').innerHTML = `<tr><td colspan="5" class="text-danger">${result.error}</td></tr>`;
-            return;
-        }
-        // CDB info
-        const cdb = result.cdb || {};
-        if (cdb.instance_name) {
-            const statusClass = cdb.status === 'OPEN' ? 'success' : 'warning';
-            document.getElementById('cdbInfo').innerHTML = `
-                <div class="row text-center">
-                    <div class="col-md-4"><h5>${cdb.instance_name}</h5><small class="text-muted">Instance Name</small></div>
-                    <div class="col-md-4"><span class="badge bg-${statusClass} fs-6">${cdb.status}</span><br><small class="text-muted">Status</small></div>
-                    <div class="col-md-4"><span class="badge bg-info fs-6">${cdb.database_status}</span><br><small class="text-muted">Database Status</small></div>
-                </div>`;
-        } else {
-            document.getElementById('cdbInfo').innerHTML = '<div class="alert alert-warning mb-0">Could not retrieve CDB info</div>';
-        }
-        // PDB table
-        const pdbs = result.pdbs || [];
-        document.getElementById('pdbCount').textContent = pdbs.length;
-        if (pdbs.length === 0) {
-            document.getElementById('pdbTableBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No pluggable databases found. Create one above.</td></tr>';
-            return;
-        }
-        let html = '';
-        for (const pdb of pdbs) {
-            const isOpen = pdb.open_mode && pdb.open_mode.includes('READ');
-            const statusBadge = isOpen
-                ? '<span class="badge bg-success">Online</span>'
-                : '<span class="badge bg-secondary">Closed</span>';
-            const openBtn = isOpen
-                ? `<button class="btn btn-sm btn-outline-warning" onclick="pdbAction('${pdb.name}','close')"><i class="fas fa-stop"></i> Close</button>`
-                : `<button class="btn btn-sm btn-outline-success" onclick="pdbAction('${pdb.name}','open')"><i class="fas fa-play"></i> Open</button>`;
-            html += `<tr>
-                <td><strong><i class="fas fa-database text-primary"></i> ${pdb.name}</strong></td>
-                <td>${pdb.open_mode || 'N/A'}</td>
-                <td>${pdb.con_id}</td>
-                <td>${statusBadge}</td>
-                <td class="text-end">
-                    <div class="btn-group btn-group-sm">
-                        ${openBtn}
-                        <button class="btn btn-sm btn-outline-danger" onclick="pdbAction('${pdb.name}','drop')"><i class="fas fa-trash"></i> Drop</button>
-                    </div>
-                </td>
-            </tr>`;
-        }
-        document.getElementById('pdbTableBody').innerHTML = html;
+let allPdbs = [];
+let wizardStep = 1;
+
+document.addEventListener('DOMContentLoaded', loadDatabases);
+
+/* ==================== LOAD DATABASE LIST ==================== */
+async function loadDatabases() {
+    const r = await apiCall('/api/databases/list');
+    if (!r.success) {
+        document.getElementById('dbTableBody').innerHTML = `<tr><td colspan="9" class="text-danger text-center py-3">${r.error}</td></tr>`;
+        return;
     }
-    
-    async function pdbAction(name, action) {
-        if (action === 'drop' && !confirm(`Drop PDB ${name}? This will delete all data permanently!`)) return;
-        appendDbOutput(`${action === 'drop' ? 'Dropping' : action === 'close' ? 'Closing' : 'Opening'} PDB ${name}...`);
-        const result = await apiCall(`/api/databases/pdb/${name}/${action}`, 'POST');
-        if (result.success) {
-            appendDbOutput(`✅ PDB ${name} ${action} completed.`);
-            if (result.output) appendDbOutput(result.output);
-            loadDatabases();
-        } else {
-            appendDbOutput(`❌ Error: ${result.error}`);
+    // CDB bar
+    const c = r.cdb || {};
+    document.getElementById('cdbName').textContent = c.instance_name || 'Unknown';
+    document.getElementById('cdbMeta').textContent = (c.host_name || '') + ' \u2022 Oracle ' + (c.version || '') + ' \u2022 ' + (c.database_status || '');
+
+    allPdbs = r.pdbs || [];
+    const running = allPdbs.filter(p => p.status === 'running').length;
+    const stopped = allPdbs.length - running;
+    document.getElementById('statPdbs').textContent = allPdbs.length;
+    document.getElementById('statRunning').textContent = running;
+    document.getElementById('statStopped').textContent = stopped;
+    document.getElementById('statNodes').textContent = r.node_count || 1;
+    document.getElementById('statPools').textContent = r.pool_count || 0;
+
+    renderTable(allPdbs);
+}
+
+function renderTable(pdbs) {
+    if (pdbs.length === 0) {
+        document.getElementById('dbTableBody').innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No databases found. Click <strong>+ Create database</strong> to get started.</td></tr>';
+        document.getElementById('filterInfo').textContent = '';
+        return;
+    }
+    let html = '';
+    for (const p of pdbs) {
+        const isSeed = p.name.includes('SEED');
+        const st = isSeed ? 'seed' : p.status;
+        const statusLabel = isSeed ? 'seed' : (st === 'running' ? 'running' : (st === 'mounted' ? 'mounted' : 'stopped'));
+        const sizeTxt = p.size_mb > 0 ? p.size_mb + ' MB' : '-';
+
+        // Resource icons
+        let resHtml = '';
+        resHtml += '<a class="res-icon" href="/storage" title="' + p.tablespace_count + ' tablespaces"><i class="fas fa-hdd"></i> ' + p.tablespace_count + '</a>';
+        resHtml += '<a class="res-icon" href="/security" title="' + p.user_count + ' users"><i class="fas fa-users"></i> ' + p.user_count + '</a>';
+        if (p.archivelog) resHtml += '<span class="res-icon" title="Archivelog enabled"><i class="fas fa-shield-alt text-success"></i></span>';
+        if (p.flashback) resHtml += '<span class="res-icon" title="Flashback enabled"><i class="fas fa-undo text-info"></i></span>';
+
+        // Quick actions
+        let qaHtml = '';
+        if (!isSeed) {
+            qaHtml += '<a href="/databases/' + p.name + '" class="btn btn-sm btn-outline-primary" title="Details"><i class="fas fa-info-circle"></i></a>';
+            qaHtml += '<button class="btn btn-sm btn-outline-secondary" onclick="exportYaml(\'' + p.name + '\')" title="Export YAML"><i class="fas fa-file-code"></i></button>';
+            qaHtml += '<button class="btn btn-sm btn-outline-secondary" onclick="quickBackup(\'' + p.name + '\')" title="Backup"><i class="fas fa-download"></i></button>';
         }
+
+        html += '<tr data-name="' + p.name + '" data-status="' + st + '">'
+            + '<td><input type="checkbox" class="db-check" value="' + p.name + '"' + (isSeed ? ' disabled' : '') + '></td>'
+            + '<td><a class="db-name" href="/databases/' + p.name + '"><i class="fas fa-database"></i> ' + p.name + '</a></td>'
+            + '<td><span class="status-pill ' + statusLabel + '"><span class="status-dot ' + statusLabel + '"></span> ' + statusLabel + '</span></td>'
+            + '<td><div class="quick-actions">' + qaHtml + '</div></td>'
+            + '<td><div class="res-icons">' + resHtml + '</div></td>'
+            + '<td><span class="res-icon" title="Pool: ' + p.storage_pool + '"><i class="fas fa-database"></i> ' + p.storage_type + '</span></td>'
+            + '<td style="font-size:.8rem;">' + (p.created || '-') + '</td>'
+            + '<td style="font-size:.8rem;"><i class="fas fa-server text-muted"></i> ' + p.node + '</td>'
+            + '<td style="font-size:.8rem;">' + sizeTxt + '</td>'
+            + '</tr>';
     }
-    
-    async function createDatabase(event) {
-        event.preventDefault();
-        const sid = document.getElementById('dbSid').value;
-        const memory = document.getElementById('dbMemory').value;
-        appendDbOutput(`Creating PDB ${sid}...`);
-        const result = await apiCall('/api/databases/create', 'POST', { sid: sid, memory: parseInt(memory) });
-        if (result.success) {
-            appendDbOutput('✅ PDB created successfully!');
-            if (result.output) appendDbOutput(result.output);
-            loadDatabases();
-        } else {
-            appendDbOutput(`❌ Error: ${result.error}`);
+    document.getElementById('dbTableBody').innerHTML = html;
+    document.getElementById('filterInfo').textContent = pdbs.length + ' of ' + allPdbs.length + ' items';
+}
+
+/* ==================== FILTER ==================== */
+function filterTable() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    const st = document.getElementById('statusFilter').value;
+    const filtered = allPdbs.filter(p => {
+        const matchName = p.name.toLowerCase().includes(q);
+        const matchStatus = !st || p.status === st || (st === 'stopped' && p.name.includes('SEED'));
+        return matchName && matchStatus;
+    });
+    renderTable(filtered);
+}
+
+/* ==================== SELECT ALL ==================== */
+function toggleSelectAll() {
+    const checked = document.getElementById('selectAll').checked;
+    document.querySelectorAll('.db-check:not(:disabled)').forEach(cb => cb.checked = checked);
+}
+
+function getSelected() {
+    return [...document.querySelectorAll('.db-check:checked')].map(cb => cb.value);
+}
+
+/* ==================== BATCH ACTIONS ==================== */
+async function pdbActionSelected(action) {
+    const sel = getSelected();
+    if (sel.length === 0) { alert('Select at least one database'); return; }
+    if (action === 'drop' && !confirm('Drop ' + sel.length + ' database(s)? This is irreversible!')) return;
+    showLog();
+    for (const name of sel) {
+        appendLog((action === 'open' ? 'Starting' : action === 'close' ? 'Stopping' : 'Removing') + ' ' + name + '...', 'step');
+        const r = await apiCall('/api/databases/pdb/' + name + '/' + action, 'POST');
+        appendLog(r.success ? '\u2705 ' + name + ' \u2014 done' : '\u274c ' + name + ' \u2014 ' + r.error, r.success ? 'ok' : 'warn');
+    }
+    loadDatabases();
+}
+
+/* ==================== QUICK ACTIONS ==================== */
+async function quickBackup(name) {
+    showLog();
+    appendLog('Running RMAN backup for ' + name + '...', 'step');
+    const r = await apiCall('/api/databases/' + name + '/backup', 'POST', {type: 'full'});
+    appendLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
+}
+
+async function exportYaml(name) {
+    const r = await apiCall('/api/databases/' + name + '/yaml');
+    if (!r.success) { alert(r.error); return; }
+    // Download as file
+    const blob = new Blob([r.yaml], {type: 'text/yaml'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name.toLowerCase() + '.yml';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function exportSelected() {
+    const sel = getSelected();
+    if (sel.length === 0) { alert('Select at least one database'); return; }
+    sel.forEach(n => exportYaml(n));
+}
+
+/* ==================== LOG ==================== */
+function showLog() {
+    const card = document.getElementById('logCard');
+    card.style.display = 'block';
+    document.getElementById('actionLog').innerHTML = '';
+}
+function appendLog(text, cls) {
+    const log = document.getElementById('actionLog');
+    const ts = new Date().toLocaleTimeString();
+    log.innerHTML += '<div class="' + (cls || '') + '">[' + ts + '] ' + text + '</div>';
+    log.scrollTop = log.scrollHeight;
+}
+
+/* ==================== CREATION WIZARD ==================== */
+function wizardNav(dir) {
+    if (dir > 0 && wizardStep < 5) wizardStep++;
+    else if (dir < 0 && wizardStep > 1) wizardStep--;
+    updateWizard();
+}
+
+function updateWizard() {
+    for (let i = 1; i <= 5; i++) {
+        document.getElementById('ws' + i).className = 'wizard-step' + (i < wizardStep ? ' done' : (i === wizardStep ? ' active' : ''));
+        document.getElementById('wp' + i).className = 'wizard-panel' + (i === wizardStep ? ' active' : '');
+    }
+    document.getElementById('wizPrev').style.display = wizardStep > 1 ? '' : 'none';
+    document.getElementById('wizNext').style.display = wizardStep < 5 ? '' : 'none';
+    document.getElementById('wizDeploy').style.display = wizardStep === 5 ? '' : 'none';
+
+    // Auto-fill admin user from PDB name
+    if (wizardStep === 2) {
+        const pdb = document.getElementById('wPdbName').value.toUpperCase();
+        document.getElementById('wAdminUser').value = pdb.toLowerCase() + '_admin';
+    }
+
+    // Generate YAML preview at step 5
+    if (wizardStep === 5) {
+        document.getElementById('yamlPreview').textContent = buildYaml();
+    }
+}
+
+function addTsRow() {
+    const pdb = document.getElementById('wPdbName').value.toUpperCase();
+    const html = '<div class="row g-2 mb-2 ts-row">'
+        + '<div class="col-md-3"><input type="text" class="form-control form-control-sm" placeholder="Name" value="' + pdb + '_IDX"></div>'
+        + '<div class="col-md-2"><input type="number" class="form-control form-control-sm" placeholder="Size MB" value="50"></div>'
+        + '<div class="col-md-2"><select class="form-select form-select-sm"><option value="true" selected>Autoextend</option><option value="false">Fixed</option></select></div>'
+        + '<div class="col-md-2"><input type="number" class="form-control form-control-sm" placeholder="Max MB" value="200"></div>'
+        + '<div class="col-md-3"><button class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.ts-row\').remove()"><i class="fas fa-trash"></i></button></div>'
+        + '</div>';
+    document.getElementById('tsRows').insertAdjacentHTML('beforeend', html);
+}
+
+function addUserRow() {
+    const html = '<div class="row g-2 mb-2 user-row">'
+        + '<div class="col-md-3"><input type="text" class="form-control form-control-sm" placeholder="Username" value=""></div>'
+        + '<div class="col-md-2"><input type="password" class="form-control form-control-sm" placeholder="Password" value=""></div>'
+        + '<div class="col-md-2"><select class="form-select form-select-sm"><option>CONNECT</option><option>RESOURCE</option><option>DBA</option></select></div>'
+        + '<div class="col-md-2"><input type="text" class="form-control form-control-sm" placeholder="Tablespace" value=""></div>'
+        + '<div class="col-md-3"><button class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.user-row\').remove()"><i class="fas fa-trash"></i></button></div>'
+        + '</div>';
+    document.getElementById('userRows').insertAdjacentHTML('beforeend', html);
+}
+
+function buildYaml() {
+    const pdb = document.getElementById('wPdbName').value.toUpperCase();
+    const admin = document.getElementById('wAdminUser').value;
+    const pass = document.getElementById('wAdminPass').value;
+    const pool = document.getElementById('wPool').value;
+
+    let yaml = 'name: ' + pdb.toLowerCase() + '\ndescription: Database ' + pdb + ' provisioned via wizard\npdb:\n  name: ' + pdb + '\n  admin_user: ' + admin + '\n  admin_password: ' + pass + '\ntablespaces:\n';
+
+    document.querySelectorAll('.ts-row').forEach(function(row) {
+        const inputs = row.querySelectorAll('input');
+        const sel = row.querySelector('select');
+        const name = inputs[0].value;
+        const size = inputs[1].value;
+        const autoext = sel.value === 'true';
+        const maxSize = inputs[2].value;
+        yaml += '- name: ' + name + '\n  size_mb: ' + size + '\n  autoextend: ' + autoext + '\n  max_size_mb: ' + maxSize + '\n  datafile_path: ' + pool + '/' + pdb + '/' + name.toLowerCase() + '.dbf\n';
+    });
+
+    yaml += 'users:\n';
+    document.querySelectorAll('.user-row').forEach(function(row) {
+        const inputs = row.querySelectorAll('input');
+        const sel = row.querySelector('select');
+        const uname = inputs[0].value;
+        const upass = inputs[1].value;
+        const role = sel.value;
+        const ts = inputs[2].value;
+        yaml += '- username: ' + uname + '\n  password: ' + upass + '\n  default_tablespace: ' + (ts || 'USERS') + '\n  temp_tablespace: TEMP\n  quota: UNLIMITED\n  roles:\n  - CONNECT\n  - ' + role + '\n';
+    });
+
+    yaml += 'protection:\n  archivelog: true\n  flashback: true\n';
+    return yaml;
+}
+
+function copyYaml() {
+    navigator.clipboard.writeText(buildYaml());
+    alert('YAML copied to clipboard');
+}
+
+function downloadYaml() {
+    const yaml = buildYaml();
+    const pdb = document.getElementById('wPdbName').value.toLowerCase();
+    const blob = new Blob([yaml], {type: 'text/yaml'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = pdb + '.yml';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function wizardDeploy() {
+    const yaml = buildYaml();
+    const logEl = document.getElementById('wizardLog');
+    logEl.style.display = 'block';
+    logEl.innerHTML = '<div class="step">Deploying...</div>';
+    document.getElementById('wizDeploy').disabled = true;
+
+    const r = await apiCall('/api/databases/create', 'POST', {yaml_content: yaml});
+    if (r.success && r.log) {
+        logEl.innerHTML = '';
+        for (const line of r.log) {
+            let cls = '';
+            if (line.startsWith('[')) cls = 'step';
+            else if (line.includes('OK')) cls = 'ok';
+            else if (line.includes('WARNING') || line.includes('ERROR')) cls = 'warn';
+            logEl.innerHTML += '<div class="' + cls + '">' + line + '</div>';
         }
+    } else {
+        logEl.innerHTML = '<div class="warn">\u274c ' + (r.error || 'Deployment failed') + '</div>';
     }
-    
-    function appendDbOutput(text) {
-        const output = document.getElementById('dbOutput');
-        const ts = new Date().toLocaleTimeString();
-        output.textContent += `\n[${ts}] ${text}`;
-        output.scrollTop = output.scrollHeight;
-    }
+    document.getElementById('wizDeploy').disabled = false;
+    loadDatabases();
+}
+
+// Reset wizard when modal opens
+var wizardModal = document.getElementById('createWizard');
+if (wizardModal) {
+    wizardModal.addEventListener('show.bs.modal', function() {
+        wizardStep = 1;
+        updateWizard();
+        document.getElementById('wizardLog').style.display = 'none';
+    });
+}
 </script>
 {% endblock %}

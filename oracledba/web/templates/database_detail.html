@@ -1,0 +1,500 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pdb_name }} - Database Stack{% endblock %}
+
+{% block content %}
+<style>
+    .stack-header { display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap; }
+    .stack-header h1 { margin:0; font-size:1.5rem; }
+    .stack-header .status-pill { font-size:.85rem; padding:4px 14px; }
+    .stack-header .back-link { color:#6c757d; text-decoration:none; font-size:.9rem; }
+    .stack-header .back-link:hover { color:#0d6efd; }
+
+    /* Overview cards */
+    .ov-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem; margin-bottom:1.5rem; }
+    .ov-card { background:#fff; border-radius:10px; padding:1rem 1.2rem; border:1px solid #e9ecef; text-align:center; }
+    .ov-card .ov-num { font-size:1.8rem; font-weight:700; }
+    .ov-card .ov-lbl { font-size:.75rem; text-transform:uppercase; color:#6c757d; }
+    .ov-card i { font-size:1.2rem; margin-bottom:.3rem; display:block; }
+
+    /* Tab navigation */
+    .stack-tabs { border-bottom:2px solid #dee2e6; margin-bottom:1rem; display:flex; gap:0; }
+    .stack-tab { padding:.6rem 1rem; font-size:.85rem; font-weight:500; color:#6c757d; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; }
+    .stack-tab:hover { color:#0d6efd; }
+    .stack-tab.active { color:#0d6efd; border-bottom-color:#0d6efd; font-weight:600; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* Section tables */
+    .s-table { width:100%; font-size:.85rem; }
+    .s-table th { background:#f8f9fa; padding:.5rem .7rem; font-size:.72rem; text-transform:uppercase; color:#6c757d; border-bottom:2px solid #dee2e6; }
+    .s-table td { padding:.5rem .7rem; border-bottom:1px solid #eee; vertical-align:middle; }
+    .s-table tr:hover { background:#f8f9fa; }
+
+    /* Progress bar for tablespace usage */
+    .ts-bar { height:8px; border-radius:4px; background:#e9ecef; overflow:hidden; min-width:80px; }
+    .ts-bar-fill { height:100%; border-radius:4px; transition:width .3s; }
+    .ts-bar-fill.low { background:#28a745; }
+    .ts-bar-fill.med { background:#ffc107; }
+    .ts-bar-fill.high { background:#dc3545; }
+
+    /* Protection badges */
+    .prot-badge { display:inline-flex; align-items:center; gap:6px; padding:6px 14px; border-radius:8px; font-size:.8rem; font-weight:500; margin-right:.5rem; margin-bottom:.5rem; }
+    .prot-badge.on { background:#d4edda; color:#155724; }
+    .prot-badge.off { background:#f8d7da; color:#721c24; }
+
+    /* YAML preview */
+    .yaml-box { background:#1e1e1e; color:#d4d4d4; font-family:'Courier New',monospace; font-size:.8rem; padding:1rem; border-radius:8px; max-height:400px; overflow-y:auto; white-space:pre-wrap; }
+
+    /* Deploy log */
+    .detail-log { background:#0d1117; color:#c9d1d9; font-family:'Courier New',monospace; font-size:.78rem; padding:1rem; border-radius:8px; max-height:200px; overflow-y:auto; }
+    .detail-log .ok { color:#3fb950; }
+    .detail-log .warn { color:#d29922; }
+    .detail-log .step { color:#58a6ff; font-weight:700; }
+
+    /* Action buttons area */
+    .action-section { background:#f8f9fa; border:1px solid #e9ecef; border-radius:8px; padding:1rem; margin-bottom:1rem; }
+    .action-section h6 { margin-bottom:.8rem; }
+
+    /* Cross-link badges */
+    .xlink { display:inline-flex; align-items:center; gap:4px; background:#e9ecef; padding:3px 10px; border-radius:12px; font-size:.78rem; color:#495057; text-decoration:none; cursor:pointer; transition:all .2s; }
+    .xlink:hover { background:#0d6efd; color:#fff; }
+</style>
+
+<div class="container-fluid">
+    <!-- Back + Header -->
+    <div class="stack-header">
+        <a href="/databases" class="back-link"><i class="fas fa-arrow-left"></i> Databases</a>
+        <h1><i class="fas fa-database text-primary"></i> {{ pdb_name }}</h1>
+        <span class="status-pill" id="pdbStatus">loading...</span>
+        <div class="ms-auto">
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadDetail()"><i class="fas fa-sync-alt"></i></button>
+        </div>
+    </div>
+
+    <!-- Overview cards -->
+    <div class="ov-row" id="overviewRow">
+        <div class="ov-card"><i class="fas fa-hdd text-primary"></i><div class="ov-num" id="ovTs">-</div><div class="ov-lbl">Tablespaces</div></div>
+        <div class="ov-card"><i class="fas fa-file text-info"></i><div class="ov-num" id="ovDf">-</div><div class="ov-lbl">Datafiles</div></div>
+        <div class="ov-card"><i class="fas fa-users text-success"></i><div class="ov-num" id="ovUsers">-</div><div class="ov-lbl">Users</div></div>
+        <div class="ov-card"><i class="fas fa-shield-alt text-warning"></i><div class="ov-num" id="ovProt">-</div><div class="ov-lbl">Protection</div></div>
+        <div class="ov-card"><i class="fas fa-history text-danger"></i><div class="ov-num" id="ovBackups">-</div><div class="ov-lbl">Backups</div></div>
+        <div class="ov-card"><i class="fas fa-server text-secondary"></i><div class="ov-num" id="ovNode">-</div><div class="ov-lbl">Node</div></div>
+    </div>
+
+    <!-- Tab navigation -->
+    <div class="stack-tabs">
+        <div class="stack-tab active" data-tab="tablespaces"><i class="fas fa-hdd"></i> Tablespaces</div>
+        <div class="stack-tab" data-tab="datafiles"><i class="fas fa-file"></i> Datafiles</div>
+        <div class="stack-tab" data-tab="users"><i class="fas fa-users"></i> Users & Roles</div>
+        <div class="stack-tab" data-tab="backup"><i class="fas fa-download"></i> Backup & Recovery</div>
+        <div class="stack-tab" data-tab="protection"><i class="fas fa-shield-alt"></i> Protection</div>
+        <div class="stack-tab" data-tab="yaml"><i class="fas fa-file-code"></i> YAML Export</div>
+    </div>
+
+    <!-- =========== TAB: TABLESPACES =========== -->
+    <div class="tab-panel active" id="tab-tablespaces">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-hdd"></i> Tablespaces</span>
+                <a class="xlink" href="/storage"><i class="fas fa-external-link-alt"></i> Open in Storage</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="s-table">
+                        <thead>
+                            <tr><th>Name</th><th>Size MB</th><th>Used MB</th><th>Free MB</th><th>Usage</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="tsBody">
+                            <tr><td colspan="6" class="text-center text-muted py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========== TAB: DATAFILES =========== -->
+    <div class="tab-panel" id="tab-datafiles">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header"><i class="fas fa-file"></i> Datafiles</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="s-table">
+                        <thead>
+                            <tr><th>Tablespace</th><th>File</th><th>Size MB</th><th>Autoextend</th><th>Max MB</th></tr>
+                        </thead>
+                        <tbody id="dfBody">
+                            <tr><td colspan="5" class="text-center text-muted py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========== TAB: USERS =========== -->
+    <div class="tab-panel" id="tab-users">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-users"></i> Users &amp; Roles</span>
+                <a class="xlink" href="/security"><i class="fas fa-external-link-alt"></i> Open in Security</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="s-table">
+                        <thead>
+                            <tr><th>Username</th><th>Status</th><th>Default Tablespace</th><th>Roles</th></tr>
+                        </thead>
+                        <tbody id="usersBody">
+                            <tr><td colspan="4" class="text-center text-muted py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========== TAB: BACKUP & RECOVERY =========== -->
+    <div class="tab-panel" id="tab-backup">
+        <div class="row g-3">
+            <!-- Backup actions -->
+            <div class="col-md-6">
+                <div class="action-section">
+                    <h6><i class="fas fa-download"></i> Run Backup</h6>
+                    <div class="d-flex gap-2 mb-3">
+                        <button class="btn btn-primary btn-sm" onclick="runBackup('full')"><i class="fas fa-database"></i> Full Backup</button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="runBackup('incremental')"><i class="fas fa-layer-group"></i> Incremental</button>
+                    </div>
+                    <a class="xlink" href="/rman"><i class="fas fa-external-link-alt"></i> Open RMAN Manager</a>
+                </div>
+            </div>
+            <!-- Recovery actions -->
+            <div class="col-md-6">
+                <div class="action-section">
+                    <h6><i class="fas fa-undo"></i> Recovery &amp; Flashback</h6>
+                    <div class="d-flex gap-2 mb-2 flex-wrap">
+                        <div class="input-group input-group-sm" style="max-width:250px;">
+                            <input type="text" class="form-control" id="rpName" placeholder="Restore point name" value="BEFORE_CHANGE">
+                            <button class="btn btn-warning" onclick="createRestorePoint()"><i class="fas fa-plus"></i> Create</button>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <a class="xlink" href="/flashback"><i class="fas fa-external-link-alt"></i> Open Flashback Manager</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Backup history -->
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-header"><i class="fas fa-history"></i> Recent Backups</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="s-table">
+                        <thead>
+                            <tr><th>Start</th><th>End</th><th>Status</th><th>Type</th><th>Size MB</th></tr>
+                        </thead>
+                        <tbody id="backupBody">
+                            <tr><td colspan="5" class="text-center text-muted py-3">No backups found</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Restore points -->
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-flag"></i> Restore Points</span>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadRestorePoints()"><i class="fas fa-sync-alt"></i></button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="s-table">
+                        <thead>
+                            <tr><th>Name</th><th>Time</th><th>SCN</th><th>Guaranteed</th><th>Action</th></tr>
+                        </thead>
+                        <tbody id="rpBody">
+                            <tr><td colspan="5" class="text-center text-muted py-3">No restore points</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action log -->
+        <div class="card border-0 shadow-sm mt-3" id="detailLogCard" style="display:none;">
+            <div class="card-header"><i class="fas fa-terminal"></i> Action Log</div>
+            <div class="card-body p-0">
+                <div class="detail-log" id="detailLog"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========== TAB: PROTECTION =========== -->
+    <div class="tab-panel" id="tab-protection">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header"><i class="fas fa-shield-alt"></i> Protection Status</div>
+            <div class="card-body" id="protectionBody">
+                <div class="text-center text-muted py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========== TAB: YAML EXPORT =========== -->
+    <div class="tab-panel" id="tab-yaml">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-file-code"></i> YAML Configuration</span>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyYamlDetail()"><i class="fas fa-copy"></i> Copy</button>
+                    <button class="btn btn-sm btn-outline-primary ms-1" onclick="downloadYamlDetail()"><i class="fas fa-download"></i> Download</button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="yaml-box" id="yamlContent">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const PDB = '{{ pdb_name }}';
+let detailData = {};
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadDetail();
+    // Tab switching
+    document.querySelectorAll('.stack-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.stack-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        });
+    });
+});
+
+/* ==================== LOAD DETAIL ==================== */
+async function loadDetail() {
+    const r = await apiCall('/api/databases/' + PDB + '/detail');
+    if (!r.success) {
+        document.getElementById('overviewRow').innerHTML = '<div class="alert alert-danger">' + r.error + '</div>';
+        return;
+    }
+    detailData = r;
+
+    // Status pill
+    const status = r.status || 'unknown';
+    const pill = document.getElementById('pdbStatus');
+    pill.textContent = status;
+    pill.className = 'status-pill ' + (status === 'READ WRITE' ? 'running' : (status === 'MOUNTED' ? 'mounted' : 'stopped'));
+
+    // Overview numbers
+    const ts = r.tablespaces || [];
+    const df = r.datafiles || [];
+    const users = r.users || [];
+    const backups = r.backups || [];
+    const prot = r.protection || {};
+
+    document.getElementById('ovTs').textContent = ts.length;
+    document.getElementById('ovDf').textContent = df.length;
+    document.getElementById('ovUsers').textContent = users.length;
+    document.getElementById('ovBackups').textContent = backups.length;
+    document.getElementById('ovNode').textContent = r.node || 'local';
+
+    const protCount = (prot.archivelog ? 1 : 0) + (prot.flashback ? 1 : 0);
+    document.getElementById('ovProt').textContent = protCount + '/2';
+
+    // Tablespaces tab
+    renderTablespaces(ts);
+    // Datafiles tab
+    renderDatafiles(df);
+    // Users tab
+    renderUsers(users);
+    // Backups tab
+    renderBackups(backups);
+    // Protection tab
+    renderProtection(prot);
+    // YAML tab
+    loadYaml();
+    // Restore points
+    loadRestorePoints();
+}
+
+function renderTablespaces(ts) {
+    if (ts.length === 0) {
+        document.getElementById('tsBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No tablespaces found</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const t of ts) {
+        const pct = t.used_pct || 0;
+        const barClass = pct > 85 ? 'high' : (pct > 60 ? 'med' : 'low');
+        html += '<tr>'
+            + '<td><strong>' + t.name + '</strong></td>'
+            + '<td>' + (t.size_mb || '-') + '</td>'
+            + '<td>' + (t.used_mb || '-') + '</td>'
+            + '<td>' + (t.free_mb || '-') + '</td>'
+            + '<td><div class="d-flex align-items-center gap-2"><div class="ts-bar"><div class="ts-bar-fill ' + barClass + '" style="width:' + pct + '%"></div></div><small>' + pct + '%</small></div></td>'
+            + '<td><span class="badge bg-' + (t.status === 'ONLINE' ? 'success' : 'secondary') + '">' + (t.status || 'N/A') + '</span></td>'
+            + '</tr>';
+    }
+    document.getElementById('tsBody').innerHTML = html;
+}
+
+function renderDatafiles(df) {
+    if (df.length === 0) {
+        document.getElementById('dfBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No datafiles found</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const d of df) {
+        const autoext = d.autoextend === 'YES' ? '<span class="badge bg-success">YES</span>' : '<span class="badge bg-secondary">NO</span>';
+        html += '<tr>'
+            + '<td>' + d.tablespace + '</td>'
+            + '<td style="font-size:.78rem;">' + d.file_name + '</td>'
+            + '<td>' + (d.size_mb || '-') + '</td>'
+            + '<td>' + autoext + '</td>'
+            + '<td>' + (d.max_mb || '-') + '</td>'
+            + '</tr>';
+    }
+    document.getElementById('dfBody').innerHTML = html;
+}
+
+function renderUsers(users) {
+    if (users.length === 0) {
+        document.getElementById('usersBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No users found</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const u of users) {
+        const statusBadge = u.status === 'OPEN' ? '<span class="badge bg-success">OPEN</span>' : '<span class="badge bg-warning">' + u.status + '</span>';
+        const roles = (u.roles || '-');
+        html += '<tr>'
+            + '<td><i class="fas fa-user text-primary"></i> <strong>' + u.username + '</strong></td>'
+            + '<td>' + statusBadge + '</td>'
+            + '<td>' + (u.default_tablespace || '-') + '</td>'
+            + '<td style="font-size:.78rem;">' + roles + '</td>'
+            + '</tr>';
+    }
+    document.getElementById('usersBody').innerHTML = html;
+}
+
+function renderBackups(backups) {
+    if (backups.length === 0) {
+        document.getElementById('backupBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No backups recorded</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const b of backups) {
+        const stClass = b.status === 'COMPLETED' ? 'success' : (b.status === 'RUNNING' ? 'info' : 'danger');
+        html += '<tr>'
+            + '<td style="font-size:.78rem;">' + (b.start_time || '-') + '</td>'
+            + '<td style="font-size:.78rem;">' + (b.end_time || '-') + '</td>'
+            + '<td><span class="badge bg-' + stClass + '">' + b.status + '</span></td>'
+            + '<td>' + (b.input_type || '-') + '</td>'
+            + '<td>' + (b.output_mb || '-') + '</td>'
+            + '</tr>';
+    }
+    document.getElementById('backupBody').innerHTML = html;
+}
+
+function renderProtection(prot) {
+    let html = '<div class="d-flex flex-wrap">';
+    html += '<div class="prot-badge ' + (prot.archivelog ? 'on' : 'off') + '"><i class="fas fa-' + (prot.archivelog ? 'check-circle' : 'times-circle') + '"></i> ARCHIVELOG</div>';
+    html += '<div class="prot-badge ' + (prot.flashback ? 'on' : 'off') + '"><i class="fas fa-' + (prot.flashback ? 'check-circle' : 'times-circle') + '"></i> Flashback</div>';
+    html += '</div>';
+    html += '<div class="mt-3"><a class="xlink" href="/protection"><i class="fas fa-external-link-alt"></i> Manage Protection Settings</a></div>';
+    document.getElementById('protectionBody').innerHTML = html;
+}
+
+/* ==================== YAML ==================== */
+async function loadYaml() {
+    const r = await apiCall('/api/databases/' + PDB + '/yaml');
+    if (r.success) {
+        document.getElementById('yamlContent').textContent = r.yaml;
+    } else {
+        document.getElementById('yamlContent').textContent = '# Error: ' + r.error;
+    }
+}
+
+function copyYamlDetail() {
+    navigator.clipboard.writeText(document.getElementById('yamlContent').textContent);
+    alert('YAML copied to clipboard');
+}
+
+function downloadYamlDetail() {
+    const yaml = document.getElementById('yamlContent').textContent;
+    const blob = new Blob([yaml], {type: 'text/yaml'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = PDB.toLowerCase() + '.yml';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+}
+
+/* ==================== BACKUP ==================== */
+async function runBackup(type) {
+    showDetailLog();
+    appendDetailLog('Running RMAN ' + type + ' backup for ' + PDB + '...', 'step');
+    const r = await apiCall('/api/databases/' + PDB + '/backup', 'POST', {type: type});
+    appendDetailLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
+    if (r.success) loadDetail();
+}
+
+/* ==================== RESTORE POINTS ==================== */
+async function loadRestorePoints() {
+    const r = await apiCall('/api/databases/' + PDB + '/restore-points');
+    if (!r.success || !r.restore_points || r.restore_points.length === 0) {
+        document.getElementById('rpBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No restore points</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const rp of r.restore_points) {
+        html += '<tr>'
+            + '<td><strong>' + rp.name + '</strong></td>'
+            + '<td style="font-size:.78rem;">' + (rp.time || '-') + '</td>'
+            + '<td>' + (rp.scn || '-') + '</td>'
+            + '<td>' + (rp.guaranteed === 'YES' ? '<span class="badge bg-success">YES</span>' : '<span class="badge bg-secondary">NO</span>') + '</td>'
+            + '<td><button class="btn btn-sm btn-outline-warning" onclick="flashbackTo(\'' + rp.name + '\')"><i class="fas fa-undo"></i> Flashback</button></td>'
+            + '</tr>';
+    }
+    document.getElementById('rpBody').innerHTML = html;
+}
+
+async function createRestorePoint() {
+    const rpName = document.getElementById('rpName').value.trim();
+    if (!rpName) { alert('Enter a restore point name'); return; }
+    showDetailLog();
+    appendDetailLog('Creating restore point ' + rpName + '...', 'step');
+    const r = await apiCall('/api/databases/' + PDB + '/restore-point', 'POST', {name: rpName});
+    appendDetailLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
+    if (r.success) loadRestorePoints();
+}
+
+async function flashbackTo(rpName) {
+    if (!confirm('Flashback ' + PDB + ' to restore point ' + rpName + '? The database will be closed and reopened.')) return;
+    showDetailLog();
+    appendDetailLog('Flashing back ' + PDB + ' to ' + rpName + '...', 'step');
+    const r = await apiCall('/api/databases/' + PDB + '/flashback', 'POST', {restore_point: rpName});
+    appendDetailLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
+    if (r.success) loadDetail();
+}
+
+/* ==================== DETAIL LOG ==================== */
+function showDetailLog() {
+    document.getElementById('detailLogCard').style.display = 'block';
+    document.getElementById('detailLog').innerHTML = '';
+}
+function appendDetailLog(text, cls) {
+    const log = document.getElementById('detailLog');
+    const ts = new Date().toLocaleTimeString();
+    log.innerHTML += '<div class="' + (cls || '') + '">[' + ts + '] ' + text + '</div>';
+    log.scrollTop = log.scrollHeight;
+}
+</script>
+{% endblock %}
