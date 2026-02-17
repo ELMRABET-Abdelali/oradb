@@ -178,16 +178,27 @@ class SystemDetector:
             return f"SQL Error: {e}"
 
     def _parse_sql_rows(self, output):
-        """Parse pipe-delimited sqlplus output into list of dicts"""
+        """Parse pipe-delimited sqlplus output into list of dicts.
+        Finds header line by looking for first line with '|' separators."""
         rows = []
         lines = [l.strip() for l in output.split('\n') if l.strip()]
-        if len(lines) < 2:
+        # Find header line: first line with '|' that isn't all dashes
+        header_idx = -1
+        for i, line in enumerate(lines):
+            if '|' in line:
+                stripped = line.replace(' ', '').replace('|', '')
+                if stripped and not set(stripped) <= {'-'}:
+                    header_idx = i
+                    break
+        if header_idx < 0:
             return rows
-        # First non-empty line = headers, skip separator line (---)
-        headers = [h.strip() for h in lines[0].split('|')]
-        for line in lines[1:]:
-            if set(line.replace(' ', '').replace('|', '')) <= {'-'}:
-                continue  # skip separator
+        headers = [h.strip() for h in lines[header_idx].split('|')]
+        for line in lines[header_idx + 1:]:
+            if '|' not in line:
+                continue
+            stripped = line.replace(' ', '').replace('|', '')
+            if not stripped or set(stripped) <= {'-'}:
+                continue
             vals = [v.strip() for v in line.split('|')]
             if len(vals) >= len(headers):
                 rows.append(dict(zip(headers, vals[:len(headers)])))
@@ -214,6 +225,7 @@ class SystemDetector:
         try:
             # SGA components
             sga_out = self._run_sql(
+                "COL COMPONENT FORMAT A40\n"
                 "SELECT component, ROUND(current_size/1024/1024, 2) AS size_mb "
                 "FROM v$sga_dynamic_components WHERE current_size > 0;"
             )
