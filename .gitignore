@@ -1,0 +1,106 @@
+# OracleDBA Project - Git Ignore Configuration
+
+# ============================================
+# PRIVATE FOLDERS - DO NOT COMMIT
+# ============================================
+otherfiles/
+guide/
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================
+# Virtual Environments
+# ============================================
+venv/
+ENV/
+env/
+.venv
+
+# ============================================
+# IDE & Editors
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================================
+# Testing & Coverage
+# ============================================
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# ============================================
+# Jupyter Notebook
+# ============================================
+.ipynb_checkpoints
+
+# ============================================
+# Environment & Secrets
+# ============================================
+.env
+.env.local
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+*.ppk
+
+# ============================================
+# Oracle Specific
+# ============================================
+*.dmp
+*.log
+*.trc
+*.aud
+*.ora~
+*.bak
+
+# ============================================
+# System Files
+# ============================================
+Thumbs.db
+.directory
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+.tmp/
+temp/
