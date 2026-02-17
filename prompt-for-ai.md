@@ -12,7 +12,7 @@
 ## The Project
 **OraDB** (`oracledba` v1.0.0) — A Python tool that automates Oracle 19c Database installation and administration on Rocky Linux 8. It has:
 - **CLI** (`oradba`) — 26 Click commands for install, backup, tuning, security, etc.
-- **Web GUI** — Flask 3.1.2 on port 5000, 82 routes, 14 HTML templates, login: admin/admin123
+- **Web GUI** — Flask 3.1.2 on port 5000, 99+ routes, 15 HTML templates, login: admin/admin123
 - **15 Training Practicals (TPs)** — Bash scripts that automate each DBA task
 
 **Repository:** https://github.com/ELMRABET-Abdelali/oradb.git
@@ -40,6 +40,7 @@
 | PDB: PDB$SEED | CON_ID=2, READ ONLY |
 | PDB: GDCPDB | CON_ID=3, MOUNTED |
 | PDB: PRODDB | CON_ID=4, READ WRITE |
+| PDB: TESTDPL | CON_ID=5, READ WRITE (created via YAML deploy) |
 | SYS password | `Oracle123` |
 | SYSTEM password | `Oracle123` |
 | Listener port | `1521` |
@@ -88,10 +89,11 @@ ssh -i $key -o StrictHostKeyChecking=no root@138.197.171.216 "bash /tmp/test-api
 ### Helper Scripts (already in repo root)
 - `restart-gui.sh` — Kills old GUI, starts new one, waits, checks HTTP 200
 - `test-api.sh` — Logs in with cookies, hits all API endpoints, prints JSON responses
+- `test-infra.sh` — Tests infrastructure API endpoints (nodes, storage, configs, template)
 
 ---
 
-## Current State (End of Session 5 — Feb 17, 2026)
+## Current State (End of Session 6 — Feb 17, 2026)
 
 ### What's DONE and FULLY WORKING
 
@@ -129,77 +131,57 @@ ssh -i $key -o StrictHostKeyChecking=no root@138.197.171.216 "bash /tmp/test-api
 - **protection.html** — Proper JSON field checks (not string matching), status badges
 - **security.html** — User table with status badges (green=OPEN, red=LOCKED) + Lock/Unlock/Drop
 
+#### Session 6: Infrastructure Management Platform
+New `/infrastructure` page making OraDB a real database platform:
+- **Node Management** — Auto-detects local node (hostname, public IP, Oracle status). Add remote VMs via SSH credentials stored in `~/.oracledba/ssh-keys/`
+- **Storage Pools** — Scans configured paths for datafiles, disk usage bars, expandable tablespace lists with "+N more" UI
+- **NFS Management** — Add NFS servers, mount remote shares, manage pool lifecycle
+- **YAML Provisioning** — Dark-themed YAML editor. Save/load/delete configs. 5-step deployment: PDB → tablespaces → users → protection → verify
+- **17 new API routes** under `/api/infrastructure/` (nodes, storage, configs, deploy, template)
+- **New files:** `infrastructure.html` (~500 lines), `examples/db-config-production.yml`, `examples/db-config-dev.yml`
+- **Data storage:** `~/.oracledba/nodes.json` (node registry), `~/.oracledba/db-configs/*.yml` (saved configs), `~/.oracledba/ssh-keys/*.pem` (SSH keys)
+- **Deployed & verified:** PDB TESTDPL created via YAML deploy, 5 tablespaces detected, local node auto-detected
+
 ### Latest Commits
 ```
-6c2b5f9 (HEAD) fix: LINESIZE 1000 + COLUMN FORMAT + robust parse_sql_rows + show all users
+f5e80e5 (HEAD) fix: storage pool tablespace listing - use 2-column query for pipe parsing
+b59cefe fix: infinite recursion in _save_nodes_data
+16c8d06 feat: infrastructure management system - nodes, storage pools, NFS, YAML provisioning
+6c2b5f9 fix: LINESIZE 1000 + COLUMN FORMAT + robust parse_sql_rows + show all users
 ebbd232 v6 — stdin PIPE for sqlplus, structured JSON APIs, proper UI tables
-2586a31 fix: use temp files for sqlplus (superseded by stdin PIPE)
-81b3735 fix: guard change_password against None form fields
 ```
 
 ---
 
-## WHAT NEEDS TO BE BUILT — Session 6 Goal
+## WHAT NEEDS TO BE BUILT — Session 7 Goals
 
-### The Big Picture: Fully Integrated Database Management (like phpMyAdmin for Oracle)
-
-Everything works individually, but nothing is connected. The goal is a **complete, linked database management system**.
-
-### 1. Database Creation = Full Provisioning Wizard
-Creating a PDB should be a guided multi-step wizard:
-1. **Name the PDB** + choose storage location
-2. **Create/assign a tablespace** (specify datafile path, size, autoextend)
-3. **Create an admin user** for the PDB with chosen privileges (DBA, CONNECT, RESOURCE, etc.)
-4. **Configure protection:** ARCHIVELOG status, FRA assignment, flashback
-5. **Set up RMAN backup schedule** (daily incremental / weekly full)
-6. **Result:** A fully provisioned PDB with storage, user, protection, backup — all linked
-
-### 2. Database Detail Page (`/databases/<pdb_name>`)
+### 1. Database Detail Page (`/databases/<pdb_name>`)
 Each PDB gets a detail page showing everything attached to it:
 - **Status:** open mode, con_id, creation date
 - **Tablespaces:** which tablespaces belong to this PDB, their sizes, usage progress bars
-- **Datafiles:** file paths, sizes, autoextend status
 - **Users:** users in this PDB, their roles, privileges, lock status
-- **RMAN Backups:** backup history, last backup date, next scheduled backup
 - **Protection:** archivelog, FRA, flashback status for this PDB
-- **Sample Data:** create test table, insert rows, verify, drop, flashback recover, verify again
-- **Logs:** alert log entries, audit records filtered for this PDB
 
-### 3. Protection Page — Actionable, Not Just Status
-The 4 protection items (ARCHIVELOG, FRA, Flashback, RMAN) should:
-- **Be toggleable** (enable/disable with one click + confirmation)
-- **Show what's protected:** which databases, which tablespaces
-- **RMAN section:** configure retention policy, run backup now, view backup sets, test restore
-- **Flashback demo:** create restore point → make change → flashback → verify recovery
-- **Full test workflow:** create table → insert data → delete → RMAN restore / flashback → verify
+### 2. Multi-Node Operations
+- Test "Add Node" flow with a real remote VM
+- Run SQL on remote nodes via SSH tunnel
+- Show cluster-wide status on Infrastructure page
 
-### 4. Dashboard — Non-Blocking Auto-Refresh
-**Current bug:** Dashboard reloads every 3 seconds, interrupts user interaction.
-**Fix required:**
-- Use **background AJAX fetch** (`setInterval` with `fetch()`) to update DOM elements in-place
-- Show **"Last refreshed: X seconds ago"** timestamp
-- Add **manual refresh button** + auto-refresh on/off toggle
-- Metrics update without disrupting scroll position or user interactions
-
-### 5. Terminal → SQL Console (phpMyAdmin Style)
+### 3. Terminal → SQL Console (phpMyAdmin Style)
 Replace the raw terminal page with a structured SQL workspace:
 - **Top panel:** SQL input `<textarea>` with Run button
 - **Bottom panel:** Results as HTML table (not raw text)
-- **Left sidebar or dropdown:** Pre-built queries organized by category:
-  - **Monitoring:** active sessions, wait events, long-running queries, locks
-  - **Storage:** tablespace usage, datafile sizes, temp space usage
-  - **Security:** user list, role grants, privilege checks, audit trail
-  - **Performance:** top SQL by CPU/elapsed, buffer cache hit ratio, SGA/PGA breakdown
-  - **Logs:** alert log tail, listener log, RMAN log
+- **Sidebar:** Pre-built queries (monitoring, storage, security, performance, logs)
 - **Export:** download results as CSV
 - **History:** recently executed queries with re-run button
 
-### 6. Logs Management
-- View Oracle alert log (`$ORACLE_BASE/diag/rdbms/gdcprod/GDCPROD/trace/alert_GDCPROD.log`)
-- View listener log
-- View GUI access logs
-- Download / delete log files
-- Filter by date, severity, keyword
+### 4. RMAN Backup + Restore
+- Configure retention policy, run backup now, view backup sets, test restore
+- Flashback demo: create restore point → make change → flashback → verify recovery
+
+### 5. Logs Management & Dashboard Refresh
+- View/download/delete Oracle alert log, listener log, GUI logs
+- Dashboard: background AJAX fetch, refresh toggle
 
 ---
 
@@ -240,19 +222,20 @@ Add `ALTER SESSION SET CONTAINER = pdb_name;` before the SELECT in the SQL strin
 ### File Structure
 ```
 oracledba/
-├── web_server.py              # Flask app (~2620 lines, 82 routes)
+├── web_server.py              # Flask app (~3300 lines, 99+ routes)
 ├── cli.py                     # Click CLI (26 commands)
 ├── modules/install.py         # InstallManager (rewritten session 4)
 ├── scripts/tp01..tp15*.sh     # Bash scripts for each TP
 ├── web/templates/             # 14 HTML templates
-│   ├── base.html              # Layout: Bootstrap 5 + sidebar nav
-│   ├── dashboard.html         # Server-side Jinja2 (591 lines) — NEEDS AJAX conversion
+│   ├── base.html              # Layout: Bootstrap 5 + sidebar nav (Infrastructure link added)
+│   ├── dashboard.html         # Server-side Jinja2 (591 lines)
 │   ├── databases.html         # PDB management (redesigned session 5)
 │   ├── storage.html           # Tablespaces + controlfiles + redo logs (session 5)
 │   ├── protection.html        # ARCHIVELOG/FRA/Flashback/RMAN (session 5)
 │   ├── security.html          # Users + audit (session 5)
+│   ├── infrastructure.html    # Infrastructure dashboard: nodes + storage + YAML (session 6)
 │   ├── installation.html      # One-click installer wizard (session 4)
-│   ├── terminal.html          # Raw SQL terminal — NEEDS phpMyAdmin redesign
+│   ├── terminal.html          # Raw SQL terminal
 │   ├── sample.html            # Sample schema operations
 │   ├── labs.html              # TP execution runner
 │   ├── cluster.html           # RAC/ASM (placeholder)
@@ -280,8 +263,10 @@ oracledba/
 15. `LINESIZE 300` → `1000` + `TRIMSPOOL ON` + `TRIMOUT ON`
 16. `COL FORMAT` for NAME/MEMBER/COMPONENT columns
 17. Users query: removed `WHERE oracle_maintained = 'N'` filter
+18. Infinite recursion: `_save_nodes_data()` → `_ensure_infra_files()` → `_save_nodes_data()` loop — removed circular call
+19. Empty tablespace list: single-column `SELECT` has no pipe separator for `parse_sql_rows()` — changed to 2-column query
 
 ---
 
-*Last updated: February 17, 2026 — End of Session 5*
-*Latest commit: `6c2b5f9`*
+*Last updated: February 17, 2026 — End of Session 6*
+*Latest commit: `f5e80e5`*
