@@ -244,6 +244,7 @@ class SystemDetector:
         try:
             # PGA stats
             pga_out = self._run_sql(
+                "COL NAME FORMAT A40\n"
                 "SELECT name, ROUND(value/1024/1024, 2) AS size_mb FROM v$pgastat "
                 "WHERE name IN ('total PGA allocated','total PGA inuse','maximum PGA allocated');"
             )
@@ -291,6 +292,7 @@ class SystemDetector:
         try:
             # Tablespace usage
             ts_out = self._run_sql(
+                "COL NAME FORMAT A30\n"
                 "SELECT df.tablespace_name AS name, "
                 "ROUND(df.bytes/1024/1024,2) AS total_mb, "
                 "ROUND((df.bytes - NVL(fs.bytes,0))/1024/1024,2) AS used_mb, "
