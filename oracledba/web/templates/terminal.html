@@ -7,7 +7,7 @@
     <div class="row mb-4">
         <div class="col-12">
             <h1><i class="fas fa-terminal"></i> Interactive Terminal</h1>
-            <p class="text-muted">Execute OracleDBA CLI commands</p>
+            <p class="text-muted">Execute Oracle DBA commands: oradba, sqlplus, lsnrctl, rman, and more</p>
         </div>
     </div>
 
@@ -15,7 +15,7 @@
         <div class="col-12">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="fas fa-terminal"></i> Command Terminal</span>
+                    <span><i class="fas fa-terminal"></i> DBA Terminal</span>
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearTerminal()">
                         <i class="fas fa-trash"></i> Clear
                     </button>
@@ -23,9 +23,9 @@
                 <div class="card-body">
                     <!-- Command Input -->
                     <div class="input-group mb-3">
-                        <span class="input-group-text">$</span>
+                        <span class="input-group-text">oracle@db $</span>
                         <input type="text" class="form-control" id="commandInput" 
-                               placeholder="Enter oradba command..." onkeypress="handleKeyPress(event)">
+                               placeholder="Enter command (oradba, sqlplus, lsnrctl, rman...)" onkeypress="handleKeyPress(event)">
                         <button class="btn btn-primary" onclick="executeCommand()">
                             <i class="fas fa-play"></i> Execute
                         </button>
@@ -34,21 +34,22 @@
                     <!-- Terminal Output -->
                     <div class="terminal-output" id="terminalOutput">
 Welcome to OracleDBA Interactive Terminal
-Type 'oradba --help' to see available commands
+==========================================
 
-Available command groups:
-  - oradba sample        : Sample database operations
-  - oradba database      : Database management
-  - oradba storage       : Storage and tablespace management
-  - oradba protection    : Data protection (ARCHIVELOG, FRA, RMAN)
-  - oradba security      : User and security management
-  - oradba cluster       : Cluster and RAC management
-  - oradba help          : Comprehensive help system
+Allowed commands:
+  oradba       - CLI tool (install, configure, maintenance...)
+  sqlplus      - Oracle SQL*Plus  
+  lsnrctl      - Listener control (start, stop, status)
+  rman         - Recovery Manager
+  asmcmd       - ASM command utility
+  srvctl       - Server control (RAC/Grid)
+  dbca         - Database Configuration Assistant
+  expdp/impdp  - Data Pump Export/Import
+  opatch       - Oracle patch utility
 
-Examples:
-  $ oradba sample create
-  $ oradba help features
-  $ oradba protection archivelog status
+System commands: df -h, free -h, hostname, uptime, ps, cat, ls, tail, grep
+
+Type any command to get started!
                     </div>
                 </div>
             </div>
@@ -80,31 +81,54 @@ Examples:
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-6">
-                            <h6>Sample Database</h6>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-database"></i> Database</h6>
                             <div class="d-grid gap-2">
-                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('oradba sample create')">
-                                    Create Sample Database
+                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('sqlplus -s / as sysdba <<< \"SELECT name, open_mode FROM v\\$database;\"')">
+                                    DB Status
                                 </button>
-                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('oradba sample status')">
-                                    Show Sample Status
+                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('sqlplus -s / as sysdba <<< \"SHOW PDBS;\"')">
+                                    List PDBs
                                 </button>
-                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('oradba sample test')">
-                                    Test Sample Database
+                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('lsnrctl status')">
+                                    Listener Status
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="quickCommand('oradba status')">
+                                    oradba Status
                                 </button>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <h6>Help & Information</h6>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-hdd"></i> Storage & Monitoring</h6>
                             <div class="d-grid gap-2">
-                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('oradba help features')">
-                                    List All Features
+                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('sqlplus -s / as sysdba <<< \"SELECT tablespace_name, ROUND(used_percent,1) pct FROM dba_tablespace_usage_metrics;\"')">
+                                    Tablespace Usage
                                 </button>
-                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('oradba help workflow')">
-                                    Show Workflow Guide
+                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('sqlplus -s / as sysdba <<< \"SELECT username, status FROM dba_users WHERE oracle_maintained=\\\"N\\\";\"')">
+                                    DB Users
                                 </button>
-                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('oradba help quick')">
-                                    Quick Reference
+                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('df -h /u01')">
+                                    Disk Space /u01
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="quickCommand('free -h')">
+                                    Memory Usage
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6><i class="fas fa-wrench"></i> System</h6>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-outline-primary" onclick="quickCommand('cat /etc/oratab')">
+                                    Oracle Tab
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" onclick="quickCommand('ps aux | grep ora_')">
+                                    Oracle Processes
+                                </button>
+                                <button class="btn btn-sm btn-outline-success" onclick="quickCommand('tail -20 /u01/app/oracle/diag/rdbms/gdcprod/GDCPROD/trace/alert_GDCPROD.log')">
+                                    Alert Log (last 20)
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="quickCommand('oradba labs')">
+                                    List Labs
                                 </button>
                             </div>
                         </div>

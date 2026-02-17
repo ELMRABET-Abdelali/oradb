@@ -875,19 +875,65 @@ def terminal():
 @app.route('/api/terminal/execute', methods=['POST'])
 @login_required
 def api_terminal_execute():
-    """API: Execute command in terminal"""
+    """API: Execute command in terminal - supports oradba, sqlplus, lsnrctl, rman, and basic shell"""
     data = request.json
     command = data.get('command', '')
     
     if not command:
         return jsonify({'success': False, 'error': 'No command provided'})
     
-    # Security: only allow oradba commands
-    if not command.startswith('oradba '):
-        return jsonify({'success': False, 'error': 'Only oradba commands are allowed'})
+    # Whitelist of allowed command prefixes for DBA operations
+    ALLOWED_PREFIXES = [
+        'oradba ',       # Our CLI tool
+        'sqlplus ',      # SQL*Plus
+        'lsnrctl ',      # Listener control
+        'rman ',         # RMAN backup/recovery
+        'asmcmd ',       # ASM commands
+        'srvctl ',       # Server control for RAC
+        'crsctl ',       # Cluster control
+        'dbca ',         # Database Configuration Assistant
+        'emctl ',        # Enterprise Manager
+        'expdp ',        # Data Pump Export
+        'impdp ',        # Data Pump Import
+        'adrci ',        # ADR Command Interpreter
+        'opatch ',       # Oracle patch utility
+        'datapatch ',    # SQL patch utility
+    ]
+    
+    # Also allow these exact commands (no prefix)
+    ALLOWED_EXACT = [
+        'id oracle', 'hostname', 'uname -a', 'df -h', 'free -h',
+        'uptime', 'nproc', 'cat /etc/os-release', 'cat /etc/oratab',
+        'ps aux | grep ora_', 'ps aux | grep tnslsnr',
+        'echo $ORACLE_HOME', 'echo $ORACLE_SID', 'echo $ORACLE_BASE',
+        'ls $ORACLE_HOME', 'ls /u01/app/oracle/oradata',
+    ]
+    
+    # Security check
+    allowed = any(command.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+    if not allowed:
+        allowed = command.strip() in ALLOWED_EXACT
+    if not allowed:
+        # Allow commands starting with common safe utilities
+        SAFE_STARTS = ['cat /etc/', 'ls /u01/', 'ls /home/oracle', 'tail ', 'head ', 'grep ']
+        allowed = any(command.startswith(s) for s in SAFE_STARTS)
+    
+    if not allowed:
+        return jsonify({
+            'success': False, 
+            'error': 'Command not allowed. Allowed: oradba, sqlplus, lsnrctl, rman, asmcmd, srvctl, crsctl, dbca, expdp, impdp, opatch, and basic system commands.'
+        })
     
     try:
-        result = execute_cli_command(command.split())
+        if command.startswith('oradba '):
+            result = execute_cli_command(command.split())
+        else:
+            # Run as oracle user with Oracle environment
+            result = run_shell_command(
+                f'source ~/.bash_profile 2>/dev/null; export CV_ASSUME_DISTID=OEL7.8; {command}',
+                as_oracle=True,
+                timeout=120
+            )
         return jsonify({'success': True, 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -903,6 +949,119 @@ def api_terminal_execute():
 def installation():
     """Installation wizard page"""
     return render_template('installation.html')
+
+
+@app.route('/api/installation/detect', methods=['GET'])
+@login_required
+@admin_required
+def api_installation_detect():
+    """Detailed detection of Oracle installation state for the installation wizard"""
+    import subprocess
+    checks = {}
+
+    # 1. Oracle user exists?
+    try:
+        result = subprocess.run(['id', 'oracle'], capture_output=True, text=True)
+        checks['oracle_user'] = result.returncode == 0
+    except Exception:
+        checks['oracle_user'] = False
+
+    # 2. Required groups (oinstall, dba)
+    try:
+        result = subprocess.run(['getent', 'group', 'oinstall'], capture_output=True, text=True)
+        oinstall = result.returncode == 0
+        result = subprocess.run(['getent', 'group', 'dba'], capture_output=True, text=True)
+        dba = result.returncode == 0
+        checks['groups'] = oinstall and dba
+    except Exception:
+        checks['groups'] = False
+
+    # 3. Oracle zip downloaded?
+    zip_paths = [
+        '/u01/app/oracle/LINUX.X64_193000_db_home.zip',
+        '/tmp/LINUX.X64_193000_db_home.zip',
+        '/home/oracle/LINUX.X64_193000_db_home.zip',
+        os.path.join(detector.oracle_home, 'LINUX.X64_193000_db_home.zip'),
+    ]
+    checks['zip_downloaded'] = any(os.path.exists(p) for p in zip_paths)
+    checks['zip_path'] = next((p for p in zip_paths if os.path.exists(p)), None)
+
+    # 4. ORACLE_HOME directory exists?
+    checks['oracle_home_exists'] = os.path.isdir(detector.oracle_home)
+    checks['oracle_home'] = detector.oracle_home
+
+    # 5. Key binaries present?
+    binaries = {}
+    for b in ['sqlplus', 'lsnrctl', 'dbca', 'rman', 'emctl']:
+        binaries[b] = os.path.exists(os.path.join(detector.oracle_home, 'bin', b))
+    checks['binaries'] = binaries
+    checks['binaries_installed'] = binaries.get('sqlplus', False) and binaries.get('lsnrctl', False)
+
+    # 6. /etc/oratab exists and has entries?
+    checks['oratab'] = False
+    checks['oratab_entries'] = []
+    if os.path.exists('/etc/oratab'):
+        try:
+            with open('/etc/oratab', 'r') as f:
+                entries = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+            checks['oratab'] = len(entries) > 0
+            checks['oratab_entries'] = entries
+        except Exception:
+            pass
+
+    # 7. Running database processes?
+    running_dbs = detector.get_running_databases()
+    checks['database_running'] = len(running_dbs) > 0
+    checks['running_instances'] = running_dbs
+
+    # 8. Listener running?
+    try:
+        result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+        checks['listener_running'] = 'tnslsnr' in result.stdout
+    except Exception:
+        checks['listener_running'] = False
+
+    # 9. Kernel parameters set?
+    checks['kernel_params'] = False
+    try:
+        if os.path.exists('/etc/sysctl.d/97-oracle-database-sysctl.conf'):
+            checks['kernel_params'] = True
+        elif os.path.exists('/etc/sysctl.conf'):
+            with open('/etc/sysctl.conf', 'r') as f:
+                checks['kernel_params'] = 'shmmax' in f.read().lower()
+    except Exception:
+        pass
+
+    # 10. Disk space on /u01
+    checks['disk_space'] = None
+    try:
+        result = subprocess.run(['df', '-BG', '/u01'], capture_output=True, text=True)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            if len(lines) > 1:
+                parts = lines[1].split()
+                if len(parts) >= 4:
+                    checks['disk_space'] = {
+                        'total': parts[1],
+                        'used': parts[2],
+                        'available': parts[3]
+                    }
+    except Exception:
+        pass
+
+    # Compute overall step status
+    steps = {
+        'step1_download': checks['zip_downloaded'],
+        'step2_system': checks['oracle_user'] and checks['groups'] and checks['kernel_params'],
+        'step3_binaries': checks['binaries_installed'],
+        'step4_database': checks['database_running']
+    }
+    checks['steps'] = steps
+
+    # Overall readiness
+    checks['fully_installed'] = all(steps.values())
+
+    return jsonify({'success': True, 'checks': checks})
 
 
 @app.route('/api/installation/download', methods=['POST'])

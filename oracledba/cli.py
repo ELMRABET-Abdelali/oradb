@@ -6,6 +6,7 @@ Complete Oracle Database Administration Tool
 
 import os
 import sys
+import subprocess
 import click
 from rich.console import Console
 from rich.table import Table
@@ -161,14 +162,94 @@ def install_gui(host, port, debug):
         # Start Flask server
         app.run(host=host, port=port, debug=debug)
         
-    except ImportError:
+    except ImportError as e:
         console.print("[bold red]❌ Web GUI dependencies not installed![/bold red]")
+        console.print(f"[dim]Error: {e}[/dim]")
         console.print("\n[yellow]Install with:[/yellow]")
-        console.print("[cyan]pip install -r requirements-gui.txt[/cyan]\n")
+        console.print("[cyan]pip install oracledba[gui][/cyan]")
+        console.print("[yellow]or:[/yellow]")
+        console.print("[cyan]pip install flask flask-cors[/cyan]\n")
         sys.exit(1)
     except Exception as e:
         console.print(f"[bold red]❌ Error starting web server:[/bold red] {e}")
         sys.exit(1)
+
+
+@install.command('check')
+def install_check():
+    """🔍 Check what's installed - detect Oracle, database, listener status"""
+    console.print("\n[bold cyan]Oracle Installation Status Check[/bold cyan]\n")
+    
+    checks = {}
+    
+    # Check oracle user
+    try:
+        result = subprocess.run(['id', 'oracle'], capture_output=True, text=True)
+        checks['oracle_user'] = result.returncode == 0
+    except:
+        checks['oracle_user'] = False
+    
+    # Check ORACLE_HOME exists
+    oracle_home = os.environ.get('ORACLE_HOME', '/u01/app/oracle/product/19.3.0/dbhome_1')
+    checks['oracle_home_exists'] = os.path.exists(oracle_home)
+    
+    # Check Oracle binaries
+    checks['sqlplus'] = os.path.exists(os.path.join(oracle_home, 'bin', 'sqlplus'))
+    checks['lsnrctl'] = os.path.exists(os.path.join(oracle_home, 'bin', 'lsnrctl'))
+    checks['dbca'] = os.path.exists(os.path.join(oracle_home, 'bin', 'dbca'))
+    
+    # Check running processes
+    try:
+        result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+        ps_output = result.stdout
+        checks['db_running'] = 'ora_pmon_' in ps_output
+        checks['listener_running'] = 'tnslsnr' in ps_output
+        
+        # Get running SIDs
+        running_sids = [line.split('ora_pmon_')[1].strip() for line in ps_output.split('\n') if 'ora_pmon_' in line]
+        checks['running_sids'] = running_sids
+    except:
+        checks['db_running'] = False
+        checks['listener_running'] = False
+        checks['running_sids'] = []
+    
+    # Check /etc/oratab
+    checks['oratab'] = os.path.exists('/etc/oratab')
+    
+    # Display results
+    table = Table(title="Installation Detection", show_header=True, header_style="bold magenta")
+    table.add_column("Component", style="white")
+    table.add_column("Status", style="white")
+    table.add_column("Details", style="dim")
+    
+    def status_icon(val):
+        return "[green]✓ YES[/green]" if val else "[red]✗ NO[/red]"
+    
+    table.add_row("Oracle User", status_icon(checks['oracle_user']), "id oracle")
+    table.add_row("ORACLE_HOME", status_icon(checks['oracle_home_exists']), oracle_home)
+    table.add_row("sqlplus Binary", status_icon(checks['sqlplus']), f"{oracle_home}/bin/sqlplus")
+    table.add_row("lsnrctl Binary", status_icon(checks['lsnrctl']), f"{oracle_home}/bin/lsnrctl")
+    table.add_row("DBCA Binary", status_icon(checks['dbca']), f"{oracle_home}/bin/dbca")
+    table.add_row("Database Running", status_icon(checks['db_running']), 
+                  ', '.join(checks.get('running_sids', [])) or 'No instances')
+    table.add_row("Listener Running", status_icon(checks['listener_running']), "tnslsnr process")
+    table.add_row("/etc/oratab", status_icon(checks['oratab']), "Database registry")
+    
+    console.print(table)
+    
+    # Recommendations
+    console.print("\n[bold cyan]Recommendations:[/bold cyan]")
+    if not checks['oracle_user']:
+        console.print("  [yellow]→ Run:[/yellow] oradba install system  [dim](TP01: create oracle user & groups)[/dim]")
+    elif not checks['sqlplus']:
+        console.print("  [yellow]→ Run:[/yellow] oradba install binaries  [dim](TP02: download & extract Oracle 19c)[/dim]")
+    elif not checks['db_running']:
+        console.print("  [yellow]→ Run:[/yellow] oradba install database  [dim](TP03: create database with DBCA)[/dim]")
+    else:
+        console.print("  [green]✓ Oracle 19c is fully installed and running![/green]")
+        console.print("  [dim]Next steps: oradba configure multiplexing | oradba configure storage | oradba install gui[/dim]")
+    
+    console.print("")
 
 
 # ============================================================================
