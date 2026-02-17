@@ -483,7 +483,7 @@
     }
     
     async function refreshStatus() {
-        const result = await apiCall('/api/system-status');
+        const result = await apiCall('/api/system-status', 'GET', null, true);
         
         if (result.checks) {
             // Update Oracle Status
@@ -510,7 +510,7 @@
     }
     
     async function refreshMetrics() {
-        const metrics = await apiCall('/api/oracle-metrics');
+        const metrics = await apiCall('/api/oracle-metrics', 'GET', null, true);
         
         if (!metrics || metrics.error) {
             console.log('No metrics available');

@@ -287,24 +287,27 @@ async function loadDetail() {
     }
     detailData = r;
 
+    // Data is nested under r.database
+    const db = r.database || {};
+
     // Status pill
-    const status = r.status || 'unknown';
+    const status = db.status || 'unknown';
     const pill = document.getElementById('pdbStatus');
-    pill.textContent = status;
-    pill.className = 'status-pill ' + (status === 'READ WRITE' ? 'running' : (status === 'MOUNTED' ? 'mounted' : 'stopped'));
+    pill.textContent = status === 'running' ? 'READ WRITE' : status.toUpperCase();
+    pill.className = 'status-pill ' + (status === 'running' ? 'running' : (status === 'mounted' ? 'mounted' : 'stopped'));
 
     // Overview numbers
-    const ts = r.tablespaces || [];
-    const df = r.datafiles || [];
-    const users = r.users || [];
-    const backups = r.backups || [];
-    const prot = r.protection || {};
+    const ts = db.tablespaces || [];
+    const df = db.datafiles || [];
+    const users = db.users || [];
+    const backups = db.backups || [];
+    const prot = db.protection || {};
 
     document.getElementById('ovTs').textContent = ts.length;
     document.getElementById('ovDf').textContent = df.length;
     document.getElementById('ovUsers').textContent = users.length;
     document.getElementById('ovBackups').textContent = backups.length;
-    document.getElementById('ovNode').textContent = r.node || 'local';
+    document.getElementById('ovNode').textContent = db.node || 'local';
 
     const protCount = (prot.archivelog ? 1 : 0) + (prot.flashback ? 1 : 0);
     document.getElementById('ovProt').textContent = protCount + '/2';

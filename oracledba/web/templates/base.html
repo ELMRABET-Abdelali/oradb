@@ -338,8 +338,8 @@
         }
         
         // Execute API call
-        async function apiCall(url, method = 'GET', data = null) {
-            showLoading();
+        async function apiCall(url, method = 'GET', data = null, silent = false) {
+            if (!silent) showLoading();
             
             try {
                 const options = {
@@ -361,7 +361,7 @@
                 console.error('API Error:', error);
                 return { success: false, error: error.message };
             } finally {
-                hideLoading();
+                if (!silent) hideLoading();
             }
         }
         

@@ -4,10 +4,21 @@
 
 {% block content %}
 <div class="container-fluid">
-    <div class="row mb-4">
+    <div class="row mb-3">
         <div class="col-12">
-            <h1><i class="fas fa-hdd"></i> Storage Management</h1>
-            <p class="text-muted">Manage tablespaces, control files, and redo logs</p>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h1 class="mb-0"><i class="fas fa-hdd"></i> Storage Management</h1>
+                    <p class="text-muted mb-0">Manage tablespaces, control files, and redo logs</p>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="fw-bold text-muted" style="font-size:.85rem;white-space:nowrap;">Database:</label>
+                    <select class="form-select form-select-sm" id="pdbSelect" style="min-width:180px;" onchange="loadTablespaces()">
+                        <option value="">All (CDB root)</option>
+                    </select>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadTablespaces()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -147,12 +158,29 @@
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', () => { loadTablespaces(); loadControlFiles(); loadRedoLogs(); });
+    document.addEventListener('DOMContentLoaded', () => { loadPdbList(); loadTablespaces(); loadControlFiles(); loadRedoLogs(); });
+
+    async function loadPdbList() {
+        const sel = document.getElementById('pdbSelect');
+        const r = await apiCall('/api/databases/list', 'GET', null, true);
+        if (!r.success) return;
+        for (const p of (r.pdbs || [])) {
+            if (p.name === 'PDB$SEED') continue;
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name + (p.status === 'running' ? '' : ' (' + p.status + ')');
+            sel.appendChild(opt);
+        }
+    }
+
+    function getSelectedPdb() { return document.getElementById('pdbSelect').value; }
     
     async function loadTablespaces() {
+        const pdb = getSelectedPdb();
         const tbody = document.getElementById('tsTableBody');
         tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
-        const result = await apiCall('/api/storage/tablespaces');
+        const url = pdb ? '/api/storage/tablespaces?pdb=' + pdb : '/api/storage/tablespaces';
+        const result = await apiCall(url);
         if (!result.success) { tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${result.error}</td></tr>`; return; }
         const tsList = result.tablespaces || [];
         document.getElementById('tsCount').textContent = tsList.length;
@@ -211,8 +239,9 @@
         const name = document.getElementById('tsName').value;
         const size = document.getElementById('tsSize').value;
         const autoextend = document.getElementById('tsAutoextend').checked;
-        appendOut(`Creating tablespace ${name} (${size})...`);
-        const result = await apiCall('/api/storage/tablespace/create', 'POST', { name, size, autoextend });
+        const pdb = getSelectedPdb();
+        appendOut(`Creating tablespace ${name} (${size})${pdb ? ' in ' + pdb : ''}...`);
+        const result = await apiCall('/api/storage/tablespace/create', 'POST', { name, size, autoextend, pdb });
         if (result.success) { appendOut('✅ Tablespace created!'); loadTablespaces(); document.getElementById('createTsForm').reset(); }
         else { appendOut(`❌ ${result.error}`); }
     }

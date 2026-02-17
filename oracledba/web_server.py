@@ -1021,8 +1021,8 @@ def api_databases_list():
         for r in ts_count_rows:
             ts_counts[r.get('CON_ID', '')] = r.get('TS_COUNT', '0')
 
-        # Get user counts per PDB
-        user_count_sql = """SELECT CON_ID, COUNT(*) AS USER_COUNT FROM CDB_USERS GROUP BY CON_ID ORDER BY CON_ID;"""
+        # Get user counts per PDB (exclude Oracle-maintained system accounts)
+        user_count_sql = """SELECT CON_ID, COUNT(*) AS USER_COUNT FROM CDB_USERS WHERE ORACLE_MAINTAINED='N' GROUP BY CON_ID ORDER BY CON_ID;"""
         user_count_result = run_sqlplus(user_count_sql)
         user_count_rows = parse_sql_rows(user_count_result)
         user_counts = {}
@@ -1163,11 +1163,11 @@ FROM DBA_DATA_FILES ORDER BY TABLESPACE_NAME, FILE_NAME;"""
                     'max_mb': float(r.get('MAX_MB', '0'))
                 })
 
-            # Users in this PDB
+            # Users in this PDB (exclude Oracle-maintained system accounts)
             user_sql = f"""ALTER SESSION SET CONTAINER = {name};
 SELECT USERNAME, ACCOUNT_STATUS, DEFAULT_TABLESPACE, TEMPORARY_TABLESPACE,
        TO_CHAR(CREATED,'YYYY-MM-DD') AS CREATED
-FROM DBA_USERS ORDER BY USERNAME;"""
+FROM DBA_USERS WHERE ORACLE_MAINTAINED='N' ORDER BY USERNAME;"""
             user_result = run_sqlplus(user_sql)
             user_rows = parse_sql_rows(user_result)
             for r in user_rows:
@@ -1232,6 +1232,7 @@ SELECT u.USERNAME, u.ACCOUNT_STATUS,
        LISTAGG(r.GRANTED_ROLE, ', ') WITHIN GROUP (ORDER BY r.GRANTED_ROLE) AS ROLES
 FROM DBA_USERS u
 LEFT JOIN DBA_ROLE_PRIVS r ON u.USERNAME = r.GRANTEE
+WHERE u.ORACLE_MAINTAINED='N'
 GROUP BY u.USERNAME, u.ACCOUNT_STATUS
 ORDER BY u.USERNAME;"""
         result = run_sqlplus(sql)
@@ -1622,9 +1623,15 @@ def storage():
 @app.route('/api/storage/tablespaces')
 @login_required
 def api_storage_tablespaces():
-    """API: List tablespaces with size info as structured JSON"""
+    """API: List tablespaces with size info (supports ?pdb= filter)"""
     try:
-        sql = """SELECT df.tablespace_name AS "TABLESPACE_NAME",
+        pdb = request.args.get('pdb', '').strip().upper()
+        import re as _re
+        container_prefix = ''
+        if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+            container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+
+        sql = f"""{container_prefix}SELECT df.tablespace_name AS "TABLESPACE_NAME",
        ROUND(df.bytes/1024/1024) AS "SIZE_MB",
        ROUND(NVL(fs.bytes,0)/1024/1024) AS "FREE_MB",
        ROUND((df.bytes - NVL(fs.bytes,0))/1024/1024) AS "USED_MB",
@@ -1659,19 +1666,24 @@ ORDER BY df.tablespace_name;"""
 @app.route('/api/storage/tablespace/create', methods=['POST'])
 @login_required
 def api_storage_tablespace_create():
-    """API: Create tablespace"""
+    """API: Create tablespace (supports pdb field for PDB-level creation)"""
     data = request.json
     name = data.get('name', '').upper()
     size = data.get('size', '500M').upper()
     autoextend = data.get('autoextend', True)
+    pdb = data.get('pdb', '').strip().upper()
     
     import re as _re
     if not name or not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', name):
         return jsonify({'success': False, 'error': 'Invalid tablespace name.'})
     
+    container_prefix = ''
+    if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+        container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+    
     try:
         autoext_clause = ' AUTOEXTEND ON NEXT 100M MAXSIZE UNLIMITED' if autoextend else ''
-        sql = f"""CREATE TABLESPACE {name}
+        sql = f"""{container_prefix}CREATE TABLESPACE {name}
   DATAFILE '/u01/app/oracle/oradata/GDCPROD/{name.lower()}01.dbf' SIZE {size}{autoext_clause};"""
         result = run_sqlplus(sql)
         return jsonify({'success': True, 'output': f'Tablespace {name} created.\n{result}'})
@@ -1752,15 +1764,21 @@ def security():
 @app.route('/api/security/users')
 @login_required
 def api_security_users():
-    """API: List database users as structured JSON"""
+    """API: List database users as structured JSON (supports ?pdb= filter)"""
     try:
-        sql = """COL "USERNAME" FORMAT A30
+        pdb = request.args.get('pdb', '').strip().upper()
+        import re as _re
+        container_prefix = ''
+        if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+            container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+
+        sql = f"""{container_prefix}COL "USERNAME" FORMAT A30
 COL "ACCOUNT_STATUS" FORMAT A30
 COL "DEFAULT_TABLESPACE" FORMAT A30
 SELECT username AS "USERNAME", account_status AS "ACCOUNT_STATUS",
        default_tablespace AS "DEFAULT_TABLESPACE", profile AS "PROFILE",
        TO_CHAR(created, 'YYYY-MM-DD') AS "CREATED"
-FROM dba_users ORDER BY username FETCH FIRST 50 ROWS ONLY;"""
+FROM dba_users WHERE ORACLE_MAINTAINED='N' ORDER BY username FETCH FIRST 50 ROWS ONLY;"""
         result = run_sqlplus(sql)
         rows = parse_sql_rows(result)
         users = []
@@ -1780,12 +1798,13 @@ FROM dba_users ORDER BY username FETCH FIRST 50 ROWS ONLY;"""
 @app.route('/api/security/user/create', methods=['POST'])
 @login_required
 def api_security_user_create():
-    """API: Create database user"""
+    """API: Create database user (supports pdb field for PDB-level creation)"""
     data = request.json
     username = data.get('username', '').upper()
     password = data.get('password', '')
     default_ts = data.get('defaultTs', 'USERS').upper()
     profile = data.get('profile', 'DEFAULT').upper()
+    pdb = data.get('pdb', '').strip().upper()
     
     import re as _re
     if not username or not _re.match(r'^[A-Z][A-Z0-9_]{0,29}$', username):
@@ -1793,8 +1812,12 @@ def api_security_user_create():
     if not password or len(password) < 4:
         return jsonify({'success': False, 'error': 'Password must be at least 4 characters.'})
     
+    container_prefix = ''
+    if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+        container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+    
     try:
-        sql = f"""CREATE USER {username} IDENTIFIED BY \"{password}\"
+        sql = f"""{container_prefix}CREATE USER {username} IDENTIFIED BY \"{password}\"
   DEFAULT TABLESPACE {default_ts}
   TEMPORARY TABLESPACE TEMP
   PROFILE {profile};
@@ -1811,7 +1834,12 @@ ALTER USER {username} QUOTA UNLIMITED ON {default_ts};"""
 @admin_required
 def api_security_user_lock(name):
     """API: Lock a database user"""
-    result = run_sqlplus(f"ALTER USER {name.upper()} ACCOUNT LOCK;")
+    pdb = request.args.get('pdb', '').strip().upper()
+    import re as _re
+    container_prefix = ''
+    if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+        container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+    result = run_sqlplus(f"{container_prefix}ALTER USER {name.upper()} ACCOUNT LOCK;")
     return jsonify({'success': True, 'output': result})
 
 
@@ -1820,7 +1848,12 @@ def api_security_user_lock(name):
 @admin_required
 def api_security_user_unlock(name):
     """API: Unlock a database user"""
-    result = run_sqlplus(f"ALTER USER {name.upper()} ACCOUNT UNLOCK;")
+    pdb = request.args.get('pdb', '').strip().upper()
+    import re as _re
+    container_prefix = ''
+    if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+        container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+    result = run_sqlplus(f"{container_prefix}ALTER USER {name.upper()} ACCOUNT UNLOCK;")
     return jsonify({'success': True, 'output': result})
 
 
@@ -1829,7 +1862,12 @@ def api_security_user_unlock(name):
 @admin_required
 def api_security_user_drop(name):
     """API: Drop a database user"""
-    result = run_sqlplus(f"DROP USER {name.upper()} CASCADE;")
+    pdb = request.args.get('pdb', '').strip().upper()
+    import re as _re
+    container_prefix = ''
+    if pdb and _re.match(r'^[A-Z][A-Z0-9_$#]{0,29}$', pdb):
+        container_prefix = f"ALTER SESSION SET CONTAINER = {pdb};\n"
+    result = run_sqlplus(f"{container_prefix}DROP USER {name.upper()} CASCADE;")
     return jsonify({'success': True, 'output': result})
 
 
