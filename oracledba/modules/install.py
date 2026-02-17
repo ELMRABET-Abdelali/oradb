@@ -200,6 +200,56 @@ class InstallManager:
             return False
 
     # =========================================================================
+    # BOOTSTRAP — ensure runtime dependencies are available
+    # =========================================================================
+
+    def _bootstrap(self):
+        """Self-heal: upgrade pip and ensure critical tools are installed.
+
+        This runs BEFORE any installation step so that gdown, flask, etc.
+        are guaranteed to work regardless of the system's initial state.
+        """
+        self._out("Bootstrapping environment...\n")
+
+        # 1. Upgrade pip / setuptools / wheel (old distro pip can't install modern packages)
+        py = sys.executable or 'python3'
+        upgrade_cmd = f'{py} -m pip install --upgrade pip setuptools wheel 2>/dev/null || true'
+        self._out("  Upgrading pip, setuptools, wheel...")
+        self._stream_cmd(['bash', '-c', upgrade_cmd])
+
+        # 2. Ensure gdown is available (needed for Google Drive download in step 2)
+        try:
+            import gdown  # noqa: F401
+            self._out("  \u2713 gdown available")
+        except ImportError:
+            self._out("  Installing gdown (Google Drive downloader)...")
+            self._stream_cmd(['bash', '-c', f'{py} -m pip install gdown 2>/dev/null || pip3 install gdown || true'])
+
+        # 3. Ensure flask is available (needed for GUI)
+        try:
+            import flask  # noqa: F401
+            self._out("  \u2713 flask available")
+        except ImportError:
+            self._out("  Installing flask (needed for GUI)...")
+            self._stream_cmd(['bash', '-c', f'{py} -m pip install flask flask-cors 2>/dev/null || true'])
+
+        # 4. Ensure gdown is on PATH for oracle user too
+        gdown_paths = [
+            os.path.expanduser('~/.local/bin/gdown'),
+            '/usr/local/bin/gdown',
+            '/usr/bin/gdown',
+        ]
+        gdown_found = any(os.path.exists(p) for p in gdown_paths)
+        if not gdown_found:
+            # Install for oracle user as well (tp02 runs as oracle)
+            self._out("  Installing gdown for oracle user...")
+            self._stream_cmd(['bash', '-c',
+                'su - oracle -c "pip3 install --user gdown 2>/dev/null || '
+                'python3 -m pip install --user gdown 2>/dev/null || true"'])
+
+        self._out("\n\u2713 Bootstrap complete\n")
+
+    # =========================================================================
     # INSTALLATION STEPS — each one does ONE thing with full live output
     # =========================================================================
 
@@ -429,6 +479,9 @@ class InstallManager:
             self._out("\u2551   oradba install                                   \u2551")
             self._out("\u255a" + "\u2550" * 53 + "\u255d")
             self._out("")
+
+            # Bootstrap — ensure pip, gdown, flask are ready
+            self._bootstrap()
 
             # Build step list
             steps = []

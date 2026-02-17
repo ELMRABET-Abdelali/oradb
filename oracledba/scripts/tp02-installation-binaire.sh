@@ -57,12 +57,22 @@ echo "✓ File ID: $GOOGLE_DRIVE_ID"
 
 echo ""
 echo "[3/4] Installation gdown (Google Drive downloader)..."
-pip3 install --user --quiet gdown 2>/dev/null || {
-    echo "Installation pip3..."
-    sudo dnf install -y -q python3-pip
-    pip3 install --user --quiet gdown
+# Try multiple methods to ensure gdown is installed
+python3 -m pip install --user --quiet gdown 2>/dev/null || \
+    pip3 install --user --quiet gdown 2>/dev/null || \
+    pip3.9 install --user --quiet gdown 2>/dev/null || {
+    echo "ERREUR: Impossible d'installer gdown"
+    exit 1
 }
-echo "✓ gdown installé"
+
+# Ensure gdown is on PATH
+export PATH="$HOME/.local/bin:$PATH"
+if ! command -v gdown &> /dev/null; then
+    echo "ERREUR: gdown introuvable après installation"
+    echo "PATH: $PATH"
+    exit 1
+fi
+echo "✓ gdown installé ($(gdown --version 2>/dev/null || echo 'version inconnue'))"
 
 echo ""
 echo "[4/4] Téléchargement Oracle 19c (3.06 GB)..."
@@ -74,7 +84,7 @@ cd $ORACLE_HOME
 if [ -f "LINUX.X64_193000_db_home.zip" ]; then
     echo "✓ Fichier déjà téléchargé"
 else
-    ~/.local/bin/gdown $GOOGLE_DRIVE_ID -O LINUX.X64_193000_db_home.zip
+    gdown $GOOGLE_DRIVE_ID -O LINUX.X64_193000_db_home.zip
     echo "✓ Téléchargement terminé"
 fi
 

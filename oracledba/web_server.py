@@ -1119,8 +1119,8 @@ sudo chown -R oracle:oinstall {oracle_home}
 # Check if gdown is installed
 if ! command -v gdown &> /dev/null; then
     echo "Installing gdown..."
-    sudo dnf install -y python3-pip || yum install -y python3-pip
-    pip3 install --user gdown
+    python3 -m pip install --upgrade pip 2>/dev/null || true
+    python3 -m pip install --user gdown 2>/dev/null || pip3 install --user gdown
     export PATH=$PATH:~/.local/bin
 fi
 
@@ -1131,7 +1131,8 @@ echo "This may take 10-20 minutes depending on your connection..."
 echo ""
 
 cd {oracle_home}
-~/.local/bin/gdown {file_id} -O {download_path}
+export PATH=$HOME/.local/bin:$PATH
+gdown {file_id} -O {download_path}
 
 if [ -f "{download_path}" ]; then
     echo ""

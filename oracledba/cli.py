@@ -174,10 +174,8 @@ def install_gui(host, port, debug):
     except ImportError as e:
         console.print("[bold red]❌ Web GUI dependencies not installed![/bold red]")
         console.print(f"[dim]Error: {e}[/dim]")
-        console.print("\n[yellow]Install with:[/yellow]")
-        console.print("[cyan]pip install oracledba[gui][/cyan]")
-        console.print("[yellow]or:[/yellow]")
-        console.print("[cyan]pip install flask flask-cors[/cyan]\n")
+        console.print("\n[yellow]Fix with:[/yellow]")
+        console.print("[cyan]pip3 install --upgrade pip && pip3 install flask flask-cors[/cyan]\n")
         sys.exit(1)
     except Exception as e:
         console.print(f"[bold red]❌ Error starting web server:[/bold red] {e}")

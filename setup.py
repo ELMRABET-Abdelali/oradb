@@ -46,6 +46,9 @@ setup(
         "paramiko>=3.4.0",
         "jinja2>=3.1.3",
         "psutil>=5.9.0",
+        "gdown>=4.7.0",
+        "flask>=3.0.0",
+        "flask-cors>=4.0.0",
     ],
     extras_require={
         "dev": [

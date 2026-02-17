@@ -76,11 +76,18 @@ dnf install -y -q --skip-broken \
     fontconfig-devel glibc glibc-devel ksh libaio libaio-devel \
     libX11 libXau libXi libXtst libXrender libXrender-devel \
     libgcc libstdc++ libstdc++-devel libxcb make net-tools nfs-utils \
-    python3 smartmontools sysstat unixODBC libnsl libnsl2 \
+    python3 python3-pip smartmontools sysstat unixODBC libnsl libnsl2 \
     tar zip unzip wget 2>/dev/null || true
 
 # Optional packages (may not exist on all Rocky 8 versions)
 dnf install -y -q compat-openssl10 python3-configshell python3-rtslib python3-six 2>/dev/null || true
+
+# Upgrade pip/setuptools/wheel to modern versions
+# Required so that gdown, flask, etc. install correctly in later steps
+echo "Upgrading pip, setuptools, wheel..."
+python3 -m pip install --upgrade pip setuptools wheel 2>/dev/null || \
+    pip3 install --upgrade pip setuptools wheel 2>/dev/null || \
+    pip3.9 install --upgrade pip setuptools wheel 2>/dev/null || true
 
 echo "✓ Packages installés"
 
