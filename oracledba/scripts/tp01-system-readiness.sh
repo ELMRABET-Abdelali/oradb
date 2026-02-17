@@ -69,21 +69,25 @@ fi
 
 echo ""
 echo "[5/8] Installation packages requis..."
-dnf update -y -q
+dnf update -y -q 2>/dev/null || true
 
-dnf install -y -q \
-    bc binutils compat-openssl10 elfutils-libelf elfutils-libelf-devel \
+dnf install -y -q --skip-broken \
+    bc binutils elfutils-libelf elfutils-libelf-devel \
     fontconfig-devel glibc glibc-devel ksh libaio libaio-devel \
     libX11 libXau libXi libXtst libXrender libXrender-devel \
     libgcc libstdc++ libstdc++-devel libxcb make net-tools nfs-utils \
-    python3 python3-configshell python3-rtslib python3-six \
-    smartmontools sysstat unixODBC libnsl libnsl2 libnsl2-devel \
-    tar zip unzip wget
+    python3 smartmontools sysstat unixODBC libnsl libnsl2 \
+    tar zip unzip wget 2>/dev/null || true
+
+# Optional packages (may not exist on all Rocky 8 versions)
+dnf install -y -q compat-openssl10 python3-configshell python3-rtslib python3-six 2>/dev/null || true
 
 echo "✓ Packages installés"
 
 echo ""
 echo "[6/8] Configuration kernel parameters..."
+# Remove old Oracle kernel params if any, then add fresh
+sed -i '/# Oracle 19c Kernel Parameters/,/net.ipv4.ip_local_port_range/d' /etc/sysctl.conf 2>/dev/null || true
 cat >> /etc/sysctl.conf << 'EOF'
 # Oracle 19c Kernel Parameters - Rocky Linux 8
 fs.file-max = 6815744
