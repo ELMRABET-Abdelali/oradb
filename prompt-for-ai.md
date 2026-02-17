@@ -19,27 +19,30 @@
 **Repository:** https://github.com/ELMRABET-Abdelali/oradb.git
 **Local path:** `C:\Users\DELL\Documents\GitHub\oradb`
 
-## Current State (as of Feb 17, 2026)
+## Current State (as of Feb 17, 2026 — End of Session 4)
 
 ### What's DONE and WORKING
-- ✅ Oracle 19c FULLY INSTALLED on VM 138.197.171.216 (Rocky 8.8, 7.5GB RAM, 2 CPUs)
-- ✅ Database running: CDB=GDCPROD, PDB=GDCPDB, Listener on port 1521
+- ✅ Oracle 19c was FULLY INSTALLED on VM 138.197.171.216 (Rocky 8.8) in Session 3
+- ✅ **Single-command install: `oradba install --yes`** — runs all 4 steps automatically with real-time terminal output
+- ✅ **install.py completely rewritten** — `_stream_cmd()` streams every line to stdout+log, step headers with timing, success banner
+- ✅ **CLI updated** — `oradba install` (no subcommand) runs full install via `invoke_without_command=True`, `--yes` skips confirmation
+- ✅ **tp03 fixed for automation** — removed `read -p` blocking prompt, auto root scripts, fixed DBCA params
+- ✅ **GUI installation page redesigned** — visual stepper (4 circles), one-click button, real-time terminal panel
+- ✅ **GUI quick install uses same code path as CLI** — `oradba install --yes` (not separate shell scripts)
 - ✅ CLI (`oradba`) works: `--version`, `--help`, `precheck`, `install system/binaries/software/database`
-- ✅ GUI runs at http://138.197.171.216:5000 (75 routes load, login works)
 - ✅ TP01 (system prep), TP02 (download 3GB binaries), TP03 (runInstaller + DBCA) all pass via CLI
-- ✅ Multiple bug fixes applied (see below)
-- ✅ DEPLOY_GUIDE.md is the comprehensive "project brain" document — READ IT for full details
-- ✅ PROJECT_STATUS.md has current state summary
+- ✅ Multiple bug fixes applied across sessions 1-4
 
 ### What NEEDS WORK (User's Priority)
-**#1 — Fix the GUI Installation Page UX.** The user said:
-> "The sync element that shows each 2 or 3 seconds is not good — just put the synced element in the header. For installation I want to see the steps running like a normal logiciel would do — step one, then step two, etc. Not a log dump. Like a normal installer on my local PC."
+**#1 — Test on fresh VM.** The VM was rebuilt with a fresh image. Need to:
+1. Clone repo, install package (`pip3.9 install -e .`)
+2. Run `oradba install --yes` and verify it completes all 4 steps
+3. Launch GUI with `oradba install gui` and verify installation page works
+4. Fix any bugs found during testing
 
-Specifically:
-1. Remove the sync/polling popup that appears every few seconds → move sync indicator to header only
-2. Redesign `/installation` page to show step-by-step progress (Step 1 ✅ → Step 2 🔄 → Step 3 ⏳)
-3. Show commands being executed in real-time, not just a log file viewer
-4. No log file list/dropdown — just flowing installation progress
+**#2 — Post-install labs.** Once install works:
+- `oradba install-all` for TP04-TP15 configuration labs
+- Test labs via GUI
 
 ## Critical Technical Details
 
@@ -47,6 +50,7 @@ Specifically:
 ```bash
 ssh -i C:\Users\DELL\Documents\GitHub\oradb\otherfiles\id_rsa root@138.197.171.216
 ```
+**Note:** VM was rebuilt — first connection will need to accept new host key.
 
 ### Git (Windows — GitHub Desktop's bundled git)
 ```powershell
@@ -64,6 +68,32 @@ $git = "C:\Users\DELL\AppData\Local\GitHubDesktop\app-3.5.4\resources\app\git\cm
 5. Test GUI: restart Flask, check browser at http://138.197.171.216:5000
 6. Find bugs → fix locally → repeat
 
+### VM Setup (Fresh Image — Do This First)
+```bash
+# 1. Install Python 3.9 + git
+dnf install -y python39 python39-pip git
+
+# 2. Clone repo
+git clone https://github.com/ELMRABET-Abdelali/oradb.git /opt/oradb
+
+# 3. Install package
+cd /opt/oradb
+pip3.9 install -e .
+
+# 4. Create oradba wrapper
+cat > /usr/local/bin/oradba << 'EOF'
+#!/bin/bash
+python3.9 -m oracledba.cli "$@"
+EOF
+chmod +x /usr/local/bin/oradba
+
+# 5. Run full install
+oradba install --yes
+
+# 6. Start GUI
+oradba install gui --host 0.0.0.0
+```
+
 ### PowerShell → SSH Escaping Problem
 When creating files on the VM via SSH, **use base64 encoding** to avoid escaping hell:
 ```powershell
@@ -76,12 +106,12 @@ ssh ... "echo BASE64_STRING | base64 -d > /path/to/file"
 |------|---------|
 | `oracledba/cli.py` | Click CLI entry point (26 commands) |
 | `oracledba/web_server.py` | Flask app (~2220 lines, 75 routes) |
-| `oracledba/modules/install.py` | InstallManager class (TP orchestration) |
+| `oracledba/modules/install.py` | InstallManager class — REWRITTEN session 4 |
 | `oracledba/scripts/tp01-system-readiness.sh` | System prep (root) |
 | `oracledba/scripts/tp02-installation-binaire.sh` | Download Oracle (oracle user) |
-| `oracledba/scripts/tp03-creation-instance.sh` | runInstaller + DBCA (oracle user) |
-| `oracledba/web/templates/installation.html` | Installation page template |
-| `DEPLOY_GUIDE.md` | **READ THIS** — 13-section master reference |
+| `oracledba/scripts/tp03-creation-instance.sh` | runInstaller + DBCA — FIXED session 4 |
+| `oracledba/web/templates/installation.html` | Installation page — REDESIGNED session 4 |
+| `DEPLOY_GUIDE.md` | 13-section master reference |
 | `PROJECT_STATUS.md` | Current state summary |
 
 ### Oracle Defaults
@@ -108,17 +138,48 @@ python3.9 -m oracledba.cli "$@"
 6. `libnsl2-devel` removed from tp01 (doesn't exist on Rocky 8), added `--skip-broken`
 7. DBCA missing `-templateName General_Purpose.dbc` → added
 8. DBCA `-memoryPercentage 40` → changed to `-totalMemory 2048`
+9. tp03 `read -p` interactive prompt → removed (was blocking automation)
+10. tp03 DBCA `-gdbname` → `-gdbName` (case fix)
+11. tp03 missing `-recoveryAreaDestination` → added
+12. install.py `capture_output=True` everywhere → replaced with `_stream_cmd()` live streaming
+13. CLI `oradba install` with no subcommand did nothing → now runs `install_all()` via `invoke_without_command=True`
+
+## Session 4 Architecture Changes (Important)
+
+### install.py Key Methods
+```python
+class InstallManager:
+    _out(text)              # Write to stdout + log file simultaneously
+    _stream_cmd(cmd)        # Popen + stream every line through _out()
+    _stream_cmd_capture(cmd) # Same but also captures output for post-checking
+    _step_header(n, total, title)  # "Step 2/4 — Download & Extract"
+    _step_result(n, success, secs) # "✓ Step 2 complete (3m 45s)"
+    
+    install_all(auto_yes=False)  # Main entry: 4 steps with timing
+    install_system()             # Just TP01
+    install_binaries()           # Just TP02
+    install_software()           # Just runInstaller + root scripts
+    create_database()            # Just listener + DBCA
+```
+
+### GUI Quick Install Flow
+1. User clicks "Start Installation" button
+2. Frontend POST `/api/installation/quick`
+3. Backend runs `nohup oradba install --yes > /tmp/oracle-install-all.log 2>&1 &`
+4. Frontend polls `/api/installation/logs/quick` every 1s
+5. Backend parses log for "Step X/Y" markers → returns `current_step`, `step_statuses`
+6. Frontend updates stepper circles (gray → blue pulse → green check)
 
 ## Documentation Warning
-There are 30+ doc files in `guide/` and `docs/` folders. **Many are outdated and contradict each other.** Three different CLI syntaxes exist across them. **DEPLOY_GUIDE.md is the AUTHORITATIVE reference** — it was rewritten in session 3 as the single source of truth.
+There are 30+ doc files in `guide/` and `docs/` folders. **Many are outdated and contradict each other.** Three different CLI syntaxes exist across them. **DEPLOY_GUIDE.md is the AUTHORITATIVE reference.**
 
 ## How to Start
-1. Read `DEPLOY_GUIDE.md` for full project context
-2. Read `PROJECT_STATUS.md` for current state
+1. Read `PROJECT_STATUS.md` for current state
+2. Read `DEPLOY_GUIDE.md` for full project context
 3. Check what the user asks for
 4. Start working — don't ask unnecessary questions
 
 ---
 
-*Last updated: February 17, 2026 — End of Session 3*
-*Latest commit: `0456101` — update PROJECT_STATUS with session 3 state*
+*Last updated: February 17, 2026 — End of Session 4*
+*Latest commit: `b3770e1` — feat: single-command install with real-time output*

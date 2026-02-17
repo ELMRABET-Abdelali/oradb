@@ -1,7 +1,7 @@
 # OraDB Project - Current Status and Understanding
 
 ## 📅 Last Updated
-February 17, 2026 — Session 3 (conversation saturated)
+February 17, 2026 — Session 4
 
 ## 🎯 Project Overview
 **OraDB** - Complete Oracle Database 19c administration tool for Rocky Linux 8
@@ -10,7 +10,7 @@ February 17, 2026 — Session 3 (conversation saturated)
 - **CLI Command:** `oradba`
 - **Primary Language:** Python 3.9
 - **Target Platform:** Rocky Linux 8
-- **Latest Commit:** `8b35bbf` — fix dbca templateName
+- **Latest Commit:** `b3770e1` — feat: single-command install with real-time output
 
 ## 🖥️ Deployment Information
 
@@ -68,6 +68,43 @@ February 17, 2026 — Session 3 (conversation saturated)
 - ✅ **TP03 Database:** DBCA created CDB GDCPROD + PDB GDCPDB, listener on port 1521
 - ✅ **Verified:** `ora_pmon_GDCPROD` process running, database operational
 - ✅ **GUI running:** http://138.197.171.216:5000 on 0.0.0.0:5000 (75 routes)
+
+### Session 4: Single-Command Install + GUI Redesign (Current)
+
+#### Core Architecture Change — `oradba install` = ONE command
+- ✅ **install.py COMPLETE REWRITE (~684 lines):**
+  - `_stream_cmd()` / `_stream_cmd_capture()` — every subprocess line streams to stdout + log simultaneously
+  - No more `capture_output=True` anywhere — user sees EVERYTHING in real-time
+  - `_step_header()` / `_step_result()` — visual step markers with per-step timing
+  - `install_all(auto_yes=True)` — 4 steps: system → binaries → software → database
+  - Success banner with connection info (SID, PDB, sqlplus commands)
+  - Public `install_software()` method (was private `_install_oracle_software()`)
+- ✅ **cli.py updated:**
+  - `oradba install` (no subcommand) runs full install via `invoke_without_command=True`
+  - `--yes` / `-y` flag skips confirmation prompt
+  - `oradba install --yes` = fully automated, zero interaction
+- ✅ **tp03-creation-instance.sh fixed for automation:**
+  - Removed `read -p` interactive prompt (was blocking automated execution)
+  - Auto-runs root scripts (orainstRoot.sh + root.sh) with error tolerance
+  - Fixed DBCA params: `-gdbName` case fix, `-totalMemory 2048`, `-recoveryAreaDestination`
+  - Idempotent `/etc/oratab` update with grep check
+
+#### GUI Redesign — Installation Page
+- ✅ **web_server.py API routes updated:**
+  - Quick install now runs `oradba install --yes` (same code path as CLI)
+  - Logs API parses "Step X/Y" markers from install.py output for progress tracking
+  - Detects `oradba install` process (not old shell script)
+- ✅ **installation.html completely rewritten:**
+  - Visual stepper: 4 circles with connecting lines (gray → blue pulse → green check)
+  - Prominent "One-Click Installation" button at top
+  - 500px terminal panel showing real-time log content
+  - Step progress updates from server-parsed markers
+  - Individual steps collapsed under "debugging" section
+  - Default SID changed from ORCL to GDCPROD
+
+#### VM Rebuild — Fresh Test Pending
+- 🔄 VM 138.197.171.216 rebuilt (fresh Rocky 8 image)
+- ⏳ Testing `oradba install --yes` on clean VM (the real proof)
 
 ## 🏗️ Architecture Understanding
 
@@ -166,17 +203,16 @@ oracledba/
 
 ## 🎯 Next Steps (For Next AI Session)
 
-### Immediate Priority — GUI Installation Page UX
-The user requested these changes to the installation page:
-1. **Remove sync popup** — Move the "synced" indicator to the header bar only, not a popup every 2-3 seconds
-2. **Step-by-step installation view** — Show each step executing sequentially like a normal installer (not a log dump). User wants to see: Step 1 complete → Step 2 running → Step 3 pending, with commands being executed visible in real-time
-3. **No log list** — Don't show a log file dropdown, just show the installation flowing step by step
-4. The user said: "like a normal logiciel would do in my local pc"
+### Immediate Priority — Verify on Fresh VM
+1. **Run `oradba install --yes` on rebuilt VM** — the single-command test
+2. **Launch GUI with `oradba install gui`** — verify installation page works
+3. **Fix any bugs found** during fresh VM testing
 
 ### Medium Priority
-- Test all 15 TPs via GUI
+- Test all 15 TPs via GUI (TP04-TP15 configuration labs)
 - Security hardening (change default passwords, HTTPS)
 - Complete dashboard integration with real Oracle metrics
+- `oradba install-all` for TP04-TP15 (post-install configuration labs)
 
 ## 📂 Important File Locations
 
@@ -289,19 +325,17 @@ oradba [start|stop|restart|status|sqlplus|exec|precheck|test|vm-init|download|ge
 - Dashboard: http://138.197.171.216:5000/dashboard
 - Installation: http://138.197.171.216:5000/installation
 
-### Key Files Modified This Session
-- `oracledba/web_server.py` — Command injection fix, except AttributeError, duplicate detector
-- `oracledba/cli.py` — Removed 7 dead imports
-- `oracledba/modules/install.py` — Removed shell=True, fixed DBCA templateName + totalMemory
-- `oracledba/scripts/tp01-system-readiness.sh` — Package fixes, idempotent sysctl
-- `DEPLOY_GUIDE.md` — Complete rewrite as 13-section project brain
-- `PROJECT_STATUS.md` — This file
+### Key Files Modified This Session (Session 4)
+- `oracledba/modules/install.py` — COMPLETE REWRITE: _stream_cmd(), step headers, install_all()
+- `oracledba/cli.py` — invoke_without_command, --yes flag, public install_software()
+- `oracledba/scripts/tp03-creation-instance.sh` — Removed read -p, auto root scripts, fixed DBCA
+- `oracledba/web_server.py` — Quick install uses `oradba install --yes`, step parsing in logs API
+- `oracledba/web/templates/installation.html` — Visual stepper, one-click button, terminal panel
+- `PROJECT_STATUS.md` — This file (updated for session 4)
+- `prompt-for-ai.md` — Updated for session 4 continuation
 
-### Commits This Session
-- `a58b53e` — new release v4 (bug fixes from session 2)
-- `339b349` — docs: rewrite DEPLOY_GUIDE as master project brain document
-- `e4fe9cf` — fix: tp01 skip-broken packages, idempotent sysctl
-- `8b35bbf` — fix dbca templateName
+### Commits This Session (Session 4)
+- `b3770e1` — feat: single-command install with real-time output (oradba install --yes)
 
 ### Common Issues
 - **PowerShell → SSH escaping:** Use base64 encoding for complex commands
@@ -324,4 +358,4 @@ oradba [start|stop|restart|status|sqlplus|exec|precheck|test|vm-init|download|ge
 
 ---
 
-**Status:** ✅ Oracle 19c installed and running | ✅ CLI working (26 commands) | ✅ GUI running (75 routes) | 🔧 GUI installation UX needs improvement
+**Status:** ✅ Single-command install ready (`oradba install --yes`) | ✅ GUI redesigned with stepper | 🔄 Testing on fresh VM
