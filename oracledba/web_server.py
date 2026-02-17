@@ -169,6 +169,12 @@ class SystemDetector:
 
         full_sql = f"""SET PAGESIZE 1000\nSET LINESIZE 300\nSET FEEDBACK OFF\nSET HEADING ON\nSET COLSEP '|'\n{sql}\nEXIT;\n"""
         try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, prefix='oradba_') as f:
+                f.write(full_sql)
+                sql_file = f.name
+            os.chmod(sql_file, 0o644)
+
             uid = -1
             try:
                 uid = os.getuid()
@@ -176,11 +182,15 @@ class SystemDetector:
                 uid = -1
             if uid == 0:
                 cmd = ['su', '-', 'oracle', '-c',
-                       f'echo "{full_sql}" | {self.oracle_home}/bin/sqlplus -s "/ as sysdba"']
+                       f'{self.oracle_home}/bin/sqlplus -s "/ as sysdba" < {sql_file}']
             else:
                 cmd = ['bash', '-c',
-                       f'echo "{full_sql}" | {self.oracle_home}/bin/sqlplus -s "/ as sysdba"']
+                       f'{self.oracle_home}/bin/sqlplus -s "/ as sysdba" < {sql_file}']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            try:
+                os.unlink(sql_file)
+            except OSError:
+                pass
             return result.stdout.strip()
         except Exception as e:
             return f"SQL Error: {e}"
@@ -1675,6 +1685,13 @@ EXIT;
 """
     
     try:
+        # Write SQL to temp file to avoid shell escaping issues with $ in V$views
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, prefix='oradba_') as f:
+            f.write(full_sql)
+            sql_file = f.name
+        os.chmod(sql_file, 0o644)
+
         # Try as oracle user if running as root
         uid = -1
         try:
@@ -1683,11 +1700,16 @@ EXIT;
             uid = -1
         
         if uid == 0:
-            cmd = ['su', '-', 'oracle', '-c', f'echo "{full_sql}" | {oracle_home}/bin/sqlplus -s "{connect_str}"']
+            cmd = ['su', '-', 'oracle', '-c', f'{oracle_home}/bin/sqlplus -s "{connect_str}" < {sql_file}']
         else:
-            cmd = ['bash', '-c', f'echo "{full_sql}" | {oracle_home}/bin/sqlplus -s "{connect_str}"']
+            cmd = ['bash', '-c', f'{oracle_home}/bin/sqlplus -s "{connect_str}" < {sql_file}']
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        # Clean up temp file
+        try:
+            os.unlink(sql_file)
+        except OSError:
+            pass
         return result.stdout.strip()
     except Exception as e:
         return f"SQL Error: {str(e)}"
