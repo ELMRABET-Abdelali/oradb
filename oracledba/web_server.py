@@ -62,26 +62,47 @@ class SystemDetector:
         
         # Check listener
         listener_running = False
+        listener_ports = []
+        listeners = []
         try:
             result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
             listener_running = 'tnslsnr' in result.stdout
+            if listener_running:
+                listeners = ['LISTENER']
+                listener_ports = [1521]
         except:
             pass
         
         # Check ASM
         asm_running = False
+        asm_installed = False
         try:
             result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
             asm_running = 'asm_pmon_' in result.stdout
+            asm_installed = os.path.exists('/u01/app/grid') or os.path.exists('/u01/app/19.3.0/grid')
         except:
             pass
         
         # Check Grid/Cluster
         grid_installed = os.path.exists('/u01/app/grid') or os.path.exists('/u01/app/19.3.0/grid')
+        grid_running = False
         cluster_configured = False
         try:
             if os.path.exists('/etc/oracle/olr.loc'):
                 cluster_configured = True
+            result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+            grid_running = 'ohasd' in result.stdout or 'crsd' in result.stdout
+        except:
+            pass
+        
+        # Get current SID from environment
+        current_sid = os.environ.get('ORACLE_SID', running_dbs[0] if running_dbs else 'Not Set')
+        
+        # Count database processes
+        db_processes = 0
+        try:
+            result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+            db_processes = len([line for line in result.stdout.split('\n') if 'ora_' in line])
         except:
             pass
         
@@ -96,23 +117,36 @@ class SystemDetector:
             'database': {
                 'running': len(running_dbs) > 0,
                 'instances': running_dbs,
-                'count': len(running_dbs)
+                'count': len(running_dbs),
+                'current_sid': current_sid,
+                'processes': db_processes
             },
             'listener': {
                 'running': listener_running,
-                'status': 'Running' if listener_running else 'Stopped'
+                'status': 'Running' if listener_running else 'Stopped',
+                'listeners': listeners,
+                'ports': listener_ports
             },
             'cluster': {
                 'configured': cluster_configured,
-                'type': 'RAC' if cluster_configured else 'Single Instance'
+                'type': 'RAC' if cluster_configured else 'Single Instance',
+                'nodes': []
             },
             'grid': {
                 'installed': grid_installed,
-                'status': 'Installed' if grid_installed else 'Not Installed'
+                'running': grid_running,
+                'status': 'Running' if grid_running else ('Installed' if grid_installed else 'Not Installed')
             },
             'asm': {
                 'running': asm_running,
+                'installed': asm_installed,
                 'status': 'Running' if asm_running else 'Not Running'
+            },
+            'features': {
+                'archivelog': False,
+                'flashback': False,
+                'dataguard': False,
+                'rman': oracle_installed
             }
         }
     
@@ -443,7 +477,7 @@ def api_installation_status():
                 'binaries': detection['oracle']['binaries']
             },
             'listener': {
-                'installed': detection['oracle']['binaries'].get('lsnrctl', False),
+                'installed': detection['oracle']['binaries'] if isinstance(detection['oracle']['binaries'], bool) else detection['oracle']['binaries'].get('lsnrctl', False),
                 'can_activate': detection['oracle']['installed'] and not detection['listener']['running'],
                 'active': detection['listener']['running'],
                 'ports': detection['listener']['ports']
@@ -466,7 +500,7 @@ def api_installation_status():
             'total_components': 4,
             'installed': sum([
                 detection['oracle']['installed'],
-                detection['oracle']['binaries'].get('lsnrctl', False),
+                detection['oracle']['binaries'] if isinstance(detection['oracle']['binaries'], bool) else detection['oracle']['binaries'].get('lsnrctl', False),
                 detection['grid']['installed'],
                 detection['asm']['installed']
             ]),
@@ -552,7 +586,7 @@ def get_system_status():
         'oracle': {
             'version': detection['oracle']['version'],
             'binaries': detection['oracle']['binaries'],
-            'installation_valid': all(detection['oracle']['binaries'].values())
+            'installation_valid': detection['oracle']['binaries'] if isinstance(detection['oracle']['binaries'], bool) else all(detection['oracle']['binaries'].values())
         },
         
         # Database details
