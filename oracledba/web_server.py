@@ -41,6 +41,120 @@ class SystemDetector:
             return [line.split('ora_pmon_')[1].strip() for line in pmon_lines]
         except:
             return []
+    
+    def detect_all(self):
+        """Detect all Oracle components and their status"""
+        oracle_installed = self.is_oracle_installed()
+        running_dbs = self.get_running_databases()
+        
+        # Check Oracle version
+        oracle_version = 'Unknown'
+        if oracle_installed:
+            try:
+                version_file = os.path.join(self.oracle_home, 'inventory', 'ContentsXML', 'oraclehomeproperties.xml')
+                if os.path.exists(version_file):
+                    with open(version_file, 'r') as f:
+                        content = f.read()
+                        if '19' in content:
+                            oracle_version = '19c'
+            except:
+                oracle_version = '19c'
+        
+        # Check listener
+        listener_running = False
+        try:
+            result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+            listener_running = 'tnslsnr' in result.stdout
+        except:
+            pass
+        
+        # Check ASM
+        asm_running = False
+        try:
+            result = subprocess.run(['ps', '-ef'], capture_output=True, text=True)
+            asm_running = 'asm_pmon_' in result.stdout
+        except:
+            pass
+        
+        # Check Grid/Cluster
+        grid_installed = os.path.exists('/u01/app/grid') or os.path.exists('/u01/app/19.3.0/grid')
+        cluster_configured = False
+        try:
+            if os.path.exists('/etc/oracle/olr.loc'):
+                cluster_configured = True
+        except:
+            pass
+        
+        return {
+            'oracle': {
+                'installed': oracle_installed,
+                'version': oracle_version,
+                'oracle_home': self.oracle_home,
+                'oracle_base': self.oracle_base,
+                'binaries': oracle_installed
+            },
+            'database': {
+                'running': len(running_dbs) > 0,
+                'instances': running_dbs,
+                'count': len(running_dbs)
+            },
+            'listener': {
+                'running': listener_running,
+                'status': 'Running' if listener_running else 'Stopped'
+            },
+            'cluster': {
+                'configured': cluster_configured,
+                'type': 'RAC' if cluster_configured else 'Single Instance'
+            },
+            'grid': {
+                'installed': grid_installed,
+                'status': 'Installed' if grid_installed else 'Not Installed'
+            },
+            'asm': {
+                'running': asm_running,
+                'status': 'Running' if asm_running else 'Not Running'
+            }
+        }
+    
+    def get_oracle_metrics(self):
+        """Get Oracle performance metrics"""
+        metrics = {
+            'cpu_usage': 0,
+            'memory_usage': 0,
+            'disk_usage': 0,
+            'sessions': 0,
+            'active_sessions': 0
+        }
+        
+        try:
+            # Get basic system metrics
+            result = subprocess.run(['free', '-m'], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                if len(lines) > 1:
+                    mem_line = lines[1].split()
+                    if len(mem_line) > 2:
+                        total = int(mem_line[1])
+                        used = int(mem_line[2])
+                        if total > 0:
+                            metrics['memory_usage'] = int((used / total) * 100)
+        except:
+            pass
+        
+        try:
+            # Get disk usage
+            result = subprocess.run(['df', '-h', '/u01'], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                if len(lines) > 1:
+                    disk_line = lines[1].split()
+                    if len(disk_line) > 4:
+                        usage = disk_line[4].replace('%', '')
+                        metrics['disk_usage'] = int(usage)
+        except:
+            pass
+        
+        return metrics
 
 detector = SystemDetector()
 
