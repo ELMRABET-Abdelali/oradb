@@ -502,13 +502,19 @@ def logout():
 def change_password():
     """Change password"""
     if request.method == 'POST':
-        current_password = request.form.get('current_password')
-        new_password = request.form.get('new_password')
-        confirm_password = request.form.get('confirm_password')
+        current_password = request.form.get('current_password', '')
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        if not new_password or not confirm_password:
+            flash('Please fill in all password fields', 'error')
+            return render_template('change_password.html',
+                                   must_change=config_manager.load_users()[session['user']].get('must_change_password', False))
         
         if new_password != confirm_password:
             flash('Passwords do not match', 'error')
-            return render_template('change_password.html')
+            return render_template('change_password.html',
+                                   must_change=config_manager.load_users()[session['user']].get('must_change_password', False))
         
         # Password strength check
         if len(new_password) < 8:
