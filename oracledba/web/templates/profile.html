@@ -28,7 +28,7 @@
                         <tr>
                             <td><strong>Role:</strong></td>
                             <td>
-                                <span class="badge badge-{{ 'danger' if profile.role == 'admin' else 'info' }}">
+                                <span class="badge {{ 'bg-danger' if profile.role == 'admin' else 'bg-info' }} text-white">
                                     {{ profile.role|upper }}
                                 </span>
                             </td>
@@ -58,11 +58,11 @@
                             <td><strong>Password Security:</strong></td>
                             <td>
                                 {% if 'PBKDF2' in profile.password_security %}
-                                <span class="badge badge-success">
+                                <span class="badge bg-success text-white">
                                     <i class="fas fa-lock"></i> Secure (PBKDF2)
                                 </span>
                                 {% else %}
-                                <span class="badge badge-warning">
+                                <span class="badge bg-warning text-dark">
                                     <i class="fas fa-exclamation-triangle"></i> Legacy
                                 </span>
                                 {% endif %}
@@ -81,13 +81,13 @@
                         <tr>
                             <td><strong>Encryption:</strong></td>
                             <td>
-                                <span class="badge badge-dark">SHA-256 + Salt</span>
+                                <span class="badge bg-dark text-white">SHA-256 + Salt</span>
                             </td>
                         </tr>
                     </table>
 
                     <div class="mt-3">
-                        <a href="{{ url_for('change_password') }}" class="btn btn-primary btn-block">
+                        <a href="{{ url_for('change_password') }}" class="btn btn-primary w-100">
                             <i class="fas fa-key"></i> Change Password
                         </a>
                     </div>
@@ -154,34 +154,103 @@
                 <div class="card-header bg-danger text-white">
                     <h5 class="mb-0"><i class="fas fa-user-cog"></i> Administrator Tools</h5>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-3">
-                            <a href="/api/installation-status" target="_blank" class="btn btn-outline-primary btn-block">
-                                <i class="fas fa-info-circle"></i><br>
-                                Installation Status
-                            </a>
+                <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-user-cog"></i> Administrator Tools</h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="refreshAllAdminPanels()">
+                        <i class="fas fa-sync-alt"></i> Refresh All
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="accordion" id="adminAccordion">
+                        <!-- Installation Status Panel -->
+                        <div class="accordion-item border-0 border-bottom">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed py-2" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#panelInstall"
+                                        onclick="loadAdminPanel('panelInstall','/api/installation-status',fmtInstall,'installStatusBody')">
+                                    <i class="fas fa-info-circle me-2 text-primary"></i> Installation Status
+                                </button>
+                            </h2>
+                            <div id="panelInstall" class="accordion-collapse collapse" data-bs-parent="#adminAccordion">
+                                <div class="accordion-body"><div id="installStatusBody"><em class="text-muted">Loading…</em></div></div>
+                            </div>
                         </div>
-                        <div class="col-md-3">
-                            <a href="/api/oracle-metrics" target="_blank" class="btn btn-outline-success btn-block">
-                                <i class="fas fa-chart-line"></i><br>
-                                Oracle Metrics API
-                            </a>
+                        <!-- Oracle Metrics Panel -->
+                        <div class="accordion-item border-0 border-bottom">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed py-2" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#panelMetrics"
+                                        onclick="loadAdminPanel('panelMetrics','/api/oracle-metrics',fmtMetrics,'oracleMetricsBody')">
+                                    <i class="fas fa-chart-line me-2 text-success"></i> Oracle Metrics
+                                </button>
+                            </h2>
+                            <div id="panelMetrics" class="accordion-collapse collapse" data-bs-parent="#adminAccordion">
+                                <div class="accordion-body"><div id="oracleMetricsBody"><em class="text-muted">Loading…</em></div></div>
+                            </div>
                         </div>
-                        <div class="col-md-3">
-                            <a href="/api/system-status" target="_blank" class="btn btn-outline-info btn-block">
-                                <i class="fas fa-server"></i><br>
-                                System Status API
-                            </a>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-outline-warning btn-block" onclick="location.reload()">
-                                <i class="fas fa-sync-alt"></i><br>
-                                Refresh Data
-                            </button>
+                        <!-- System Status Panel -->
+                        <div class="accordion-item border-0">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed py-2" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#panelSystem"
+                                        onclick="loadAdminPanel('panelSystem','/api/system-status',fmtJson,'systemStatusBody')">
+                                    <i class="fas fa-server me-2 text-info"></i> System Status
+                                </button>
+                            </h2>
+                            <div id="panelSystem" class="accordion-collapse collapse" data-bs-parent="#adminAccordion">
+                                <div class="accordion-body"><div id="systemStatusBody"><em class="text-muted">Loading…</em></div></div>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+<script>
+function fmtJson(d) {
+    return '<pre class="bg-light rounded p-3 mb-0" style="font-size:12px;max-height:320px;overflow-y:auto">' + JSON.stringify(d, null, 2) + '</pre>';
+}
+function fmtInstall(d) {
+    var steps = (d && d.steps) ? d.steps : null;
+    if (!steps) return fmtJson(d);
+    var html = '<table class="table table-sm table-bordered mb-0"><thead class="table-dark"><tr><th>Check</th><th>Status</th></tr></thead><tbody>';
+    for (var k in steps) {
+        var v = steps[k];
+        html += '<tr class="' + (v ? 'table-success' : 'table-warning') + '"><td><code>' + k + '</code></td><td>' + (v ? '&#10003;' : '&#10007;') + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+}
+function fmtMetrics(d) {
+    if (!d || !d.database) return fmtJson(d);
+    var db = d.database;
+    var items = [
+        ['Processes', db.processes && db.processes.count, 'fa-cogs'],
+        ['Sessions', db.sessions && db.sessions.count, 'fa-users'],
+        ['Datafiles', db.datafiles, 'fa-file-alt'],
+        ['Tempfiles', db.tempfiles, 'fa-thermometer-half']
+    ];
+    var html = '<div class="row g-2 mb-3">';
+    items.forEach(function(item) {
+        html += '<div class="col-6 col-md-3"><div class="card text-center p-2"><i class="fas ' + item[2] + ' fa-2x text-primary mb-1"></i><div class="fw-bold fs-5">' + (item[1] != null ? item[1] : '—') + '</div><small class="text-muted">' + item[0] + '</small></div></div>';
+    });
+    html += '</div>';
+    if (d.system) {
+        var s = d.system;
+        html += '<div class="text-muted small">CPU: ' + (s.cpu_pct || '—') + '% &bull; RAM: ' + (s.mem_used_gb || '—') + ' / ' + (s.mem_total_gb || '—') + ' GB &bull; Disk: ' + (s.disk_used_gb || '—') + ' / ' + (s.disk_total_gb || '—') + ' GB</div>';
+    }
+    return html;
+}
+var _adminLoaded = {};
+function loadAdminPanel(panelId, url, fmtFn, bodyId) {
+    var body = document.getElementById(bodyId);
+    body.innerHTML = '<span class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading…</span>';
+    fetch(url).then(function(r){return r.json();}).then(function(d){body.innerHTML=fmtFn(d);_adminLoaded[panelId]=true;}).catch(function(e){body.innerHTML='<span class="text-danger">Error: '+e.message+'</span>';});
+}
+function refreshAllAdminPanels() {
+    if (_adminLoaded['panelInstall']) loadAdminPanel('panelInstall','/api/installation-status',fmtInstall,'installStatusBody');
+    if (_adminLoaded['panelMetrics']) loadAdminPanel('panelMetrics','/api/oracle-metrics',fmtMetrics,'oracleMetricsBody');
+    if (_adminLoaded['panelSystem']) loadAdminPanel('panelSystem','/api/system-status',fmtJson,'systemStatusBody');
+}
+</script>
             </div>
         </div>
     </div>

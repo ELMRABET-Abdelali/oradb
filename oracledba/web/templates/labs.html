@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Labs - OracleDBA{% endblock %}
+{% block title %}AutoInstall Scripts - OracleDBA{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="row mb-4">
         <div class="col-12">
-            <h1><i class="fas fa-flask"></i> Oracle DBA Labs</h1>
-            <p class="text-muted">Run training practicals (TP01-TP15) to install and configure Oracle 19c features</p>
+            <h1><i class="fas fa-terminal"></i> AutoInstall Scripts</h1>
+            <p class="text-muted">Run automated install scripts (Steps 01–15) to install and configure Oracle 19c features</p>
         </div>
     </div>
 
@@ -17,9 +17,9 @@
             <div class="card border-success">
                 <div class="card-body text-center">
                     <h5><i class="fas fa-rocket text-success"></i> Full Install</h5>
-                    <p class="small text-muted">Run TP01 + TP02 + TP03 for complete Oracle 19c installation</p>
+                    <p class="small text-muted">Run Steps 01 + 02 + 03 for complete Oracle 19c installation</p>
                     <button class="btn btn-success" onclick="runSequence('01', '03')">
-                        <i class="fas fa-play"></i> Run TP01-03
+                        <i class="fas fa-play"></i> Run Steps 01–03
                     </button>
                 </div>
             </div>
@@ -28,9 +28,9 @@
             <div class="card border-primary">
                 <div class="card-body text-center">
                     <h5><i class="fas fa-cogs text-primary"></i> Post-Install Config</h5>
-                    <p class="small text-muted">Run TP04-TP09 for all post-installation configuration</p>
+                    <p class="small text-muted">Run Steps 04–09 for all post-installation configuration</p>
                     <button class="btn btn-primary" onclick="runSequence('04', '09')">
-                        <i class="fas fa-play"></i> Run TP04-09
+                        <i class="fas fa-play"></i> Run Steps 04–09
                     </button>
                 </div>
             </div>
@@ -39,9 +39,9 @@
             <div class="card border-warning">
                 <div class="card-body text-center">
                     <h5><i class="fas fa-star text-warning"></i> Advanced Features</h5>
-                    <p class="small text-muted">Run TP10-TP15 for tuning, multitenant, AI/ML, RAC</p>
+                    <p class="small text-muted">Run Steps 10–15 for tuning, multitenant, AI/ML, RAC</p>
                     <button class="btn btn-warning" onclick="runSequence('10', '15')">
-                        <i class="fas fa-play"></i> Run TP10-15
+                        <i class="fas fa-play"></i> Run Steps 10–15
                     </button>
                 </div>
             </div>
@@ -53,7 +53,7 @@
         <div class="col-12">
             <div class="card shadow-sm">
                 <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="fas fa-list"></i> All Training Practicals</h5>
+                    <h5 class="mb-0"><i class="fas fa-list"></i> All AutoInstall Scripts</h5>
                     <button class="btn btn-sm btn-outline-light" onclick="loadLabs()">
                         <i class="fas fa-sync"></i> Refresh
                     </button>
@@ -63,7 +63,7 @@
                         <table class="table table-hover" id="labs-table">
                             <thead class="table-light">
                                 <tr>
-                                    <th>TP#</th>
+                                    <th>Step</th>
                                     <th>Name</th>
                                     <th>Description</th>
                                     <th>Category</th>

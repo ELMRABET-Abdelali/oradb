@@ -118,49 +118,49 @@
                             <div class="process-indicator">
                                 <i class="fas fa-memory text-danger" style="font-size: 2em;"></i>
                                 <h6>PMON</h6>
-                                <span class="badge badge-success" id="pmon-count">{{ status.database.processes.pmon }}</span>
+                                <span class="badge bg-success text-white" id="pmon-count">{{ status.database.processes.pmon }}</span>
                             </div>
                         </div>
                         <div class="col-md-2">
                             <div class="process-indicator">
                                 <i class="fas fa-microchip text-warning" style="font-size: 2em;"></i>
                                 <h6>SMON</h6>
-                                <span class="badge badge-success" id="smon-count">{{ status.database.processes.smon }}</span>
+                                <span class="badge bg-success text-white" id="smon-count">{{ status.database.processes.smon }}</span>
                             </div>
                         </div>
                         <div class="col-md-2">
                             <div class="process-indicator">
                                 <i class="fas fa-save text-primary" style="font-size: 2em;"></i>
                                 <h6>DBWR</h6>
-                                <span class="badge badge-success" id="dbwr-count">{{ status.database.processes.dbwr }}</span>
+                                <span class="badge bg-success text-white" id="dbwr-count">{{ status.database.processes.dbwr }}</span>
                             </div>
                         </div>
                         <div class="col-md-2">
                             <div class="process-indicator">
                                 <i class="fas fa-file-alt text-info" style="font-size: 2em;"></i>
                                 <h6>LGWR</h6>
-                                <span class="badge badge-success" id="lgwr-count">{{ status.database.processes.lgwr }}</span>
+                                <span class="badge bg-success text-white" id="lgwr-count">{{ status.database.processes.lgwr }}</span>
                             </div>
                         </div>
                         <div class="col-md-2">
                             <div class="process-indicator">
                                 <i class="fas fa-check-circle text-success" style="font-size: 2em;"></i>
                                 <h6>CKPT</h6>
-                                <span class="badge badge-success" id="ckpt-count">{{ status.database.processes.ckpt }}</span>
+                                <span class="badge bg-success text-white" id="ckpt-count">{{ status.database.processes.ckpt }}</span>
                             </div>
                         </div>
                         <div class="col-md-1">
                             <div class="process-indicator">
                                 <i class="fas fa-archive text-secondary" style="font-size: 2em;"></i>
                                 <h6>ARCH</h6>
-                                <span class="badge badge-success" id="arch-count">{{ status.database.processes.arch }}</span>
+                                <span class="badge bg-success text-white" id="arch-count">{{ status.database.processes.arch }}</span>
                             </div>
                         </div>
                         <div class="col-md-1">
                             <div class="process-indicator">
                                 <i class="fas fa-medkit text-danger" style="font-size: 2em;"></i>
                                 <h6>RECO</h6>
-                                <span class="badge badge-success" id="reco-count">{{ status.database.processes.reco }}</span>
+                                <span class="badge bg-success text-white" id="reco-count">{{ status.database.processes.reco }}</span>
                             </div>
                         </div>
                     </div>
@@ -356,7 +356,7 @@
                                 <th>Running Instances</th>
                                 <td>
                                     {% for instance in status.database.instances %}
-                                    <span class="badge badge-success">{{ instance }}</span>
+                                    <span class="badge bg-success text-white">{{ instance }}</span>
                                     {% endfor %}
                                 </td>
                             </tr>

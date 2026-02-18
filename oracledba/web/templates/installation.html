@@ -87,7 +87,7 @@
                 <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-terminal"></i> Live Output</h5>
                     <div>
-                        <span class="badge badge-secondary mr-2" id="install-status-badge">Idle</span>
+                        <span class="badge bg-secondary text-white me-2" id="install-status-badge">Idle</span>
                         <button class="btn btn-outline-light btn-sm" onclick="clearLog()">
                             <i class="fas fa-eraser"></i> Clear
                         </button>
@@ -105,7 +105,7 @@
         <div class="col-12">
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-secondary text-white" data-toggle="collapse" data-target="#individual-steps" style="cursor:pointer;">
-                    <h5 class="mb-0"><i class="fas fa-tools"></i> Individual Steps <small class="ml-2">(click to expand — for debugging)</small></h5>
+                    <h5 class="mb-0"><i class="fas fa-tools"></i> Individual Steps <small class="ms-2">(click to expand — for debugging)</small></h5>
                 </div>
                 <div class="collapse" id="individual-steps">
                     <div class="card-body">
@@ -114,7 +114,7 @@
                             <h5><span class="step-number" id="step1-badge">1</span> Download Oracle 19c Software</h5>
                             <p class="text-muted mb-2">LINUX.X64_193000_db_home.zip (3.06 GB)</p>
                             <div class="status-indicator" id="download-check">
-                                <span class="badge badge-secondary">Checking...</span>
+                                <span class="badge bg-secondary text-white">Checking...</span>
                             </div>
                             <div class="row mt-3" id="download-options">
                                 <div class="col-md-6">
@@ -139,7 +139,7 @@
                             <h5><span class="step-number" id="step2-badge">2</span> System Prerequisites</h5>
                             <p class="text-muted mb-2">Users, groups, kernel parameters, packages</p>
                             <div class="status-indicator" id="system-status">
-                                <span class="badge badge-secondary">Checking...</span>
+                                <span class="badge bg-secondary text-white">Checking...</span>
                             </div>
                             <div id="system-details" class="mt-2 mb-2" style="display:none;"></div>
                             <button class="btn btn-warning btn-sm mt-2" onclick="runPrecheck()">
@@ -157,7 +157,7 @@
                             <h5><span class="step-number" id="step3-badge">3</span> Install Oracle Binaries</h5>
                             <p class="text-muted mb-2">Extract and install Oracle 19c software</p>
                             <div class="status-indicator" id="binaries-status">
-                                <span class="badge badge-secondary">Checking...</span>
+                                <span class="badge bg-secondary text-white">Checking...</span>
                             </div>
                             <div id="binaries-details" class="mt-2 mb-2" style="display:none;"></div>
                             <div class="form-group mt-3">
@@ -177,7 +177,7 @@
                             <h5><span class="step-number" id="step4-badge">4</span> Create Database</h5>
                             <p class="text-muted mb-2">Listener + DBCA → CDB + PDB</p>
                             <div class="status-indicator" id="database-status">
-                                <span class="badge badge-secondary">Checking...</span>
+                                <span class="badge bg-secondary text-white">Checking...</span>
                             </div>
                             <div id="database-details" class="mt-2 mb-2" style="display:none;"></div>
                             <div class="form-group mt-3">
@@ -373,7 +373,7 @@ function updateStepper(currentStep, totalSteps, stepStatuses) {
 function setInstallStatus(text, color) {
     const badge = document.getElementById('install-status-badge');
     badge.textContent = text;
-    badge.className = `badge badge-${color} mr-2`;
+    badge.className = `badge bg-${color} text-white me-2`;
 }
 
 // ---- Detection ----
@@ -430,7 +430,7 @@ async function runDetection() {
             html += `<div class="detect-item">${icon(ok)} ${label}</div><br>`;
         }
         if (c.fully_installed) {
-            html += '<div class="mt-2"><span class="badge badge-success" style="font-size:14px;padding:6px 12px"><i class="fas fa-check-circle"></i> Fully Installed</span></div>';
+            html += '<div class="mt-2"><span class="badge bg-success text-white" style="font-size:14px;padding:6px 12px"><i class="fas fa-check-circle"></i> Fully Installed</span></div>';
         }
         html += '</div>';
 
@@ -447,7 +447,9 @@ async function runDetection() {
         if (!installing) {
             const sts = {};
             if (c.steps.step2_system) sts['1'] = 'complete';
-            if (c.steps.step1_download) sts['2'] = 'complete';
+            // Step 2 = "Download & Extract": mark complete if zip exists OR if Oracle is
+            // already installed (ZIP was validly cleaned up after extraction)
+            if (c.steps.step1_download || c.oracle_home_exists || c.binaries.sqlplus) sts['2'] = 'complete';
             if (c.steps.step3_binaries) sts['3'] = 'complete';
             if (c.steps.step4_database) sts['4'] = 'complete';
             updateStepper(0, 4, sts);
@@ -455,12 +457,14 @@ async function runDetection() {
 
         // Individual status indicators
         document.getElementById('download-check').innerHTML = c.steps.step1_download
-            ? '<span class="badge badge-success">ZIP Found' + (c.zip_path ? ': ' + c.zip_path : '') + '</span>'
-            : '<span class="badge badge-warning">Not found</span>';
+            ? '<span class="badge bg-success text-white">ZIP Found' + (c.zip_path ? ': ' + c.zip_path : '') + '</span>'
+            : (c.oracle_home_exists || c.binaries.sqlplus)
+              ? '<span class="badge bg-success text-white">ZIP cleaned up &#10003; (Oracle installed)</span>'
+              : '<span class="badge bg-warning text-dark">Not found &mdash; needs download</span>';
 
         document.getElementById('system-status').innerHTML = c.steps.step2_system
-            ? '<span class="badge badge-success">System Ready</span>'
-            : '<span class="badge badge-warning">Setup needed</span>';
+            ? '<span class="badge bg-success text-white">System Ready</span>'
+            : '<span class="badge bg-warning text-dark">Setup needed</span>';
         if (!c.steps.step2_system) {
             const details = document.getElementById('system-details');
             let dhtml = '<small>';
@@ -473,14 +477,14 @@ async function runDetection() {
         }
 
         document.getElementById('binaries-status').innerHTML = c.steps.step3_binaries
-            ? '<span class="badge badge-success">Binaries Installed</span>'
+            ? '<span class="badge bg-success text-white">Binaries Installed</span>'
             : c.oracle_home_exists
-              ? '<span class="badge badge-info">ORACLE_HOME exists</span>'
-              : '<span class="badge badge-secondary">Not installed</span>';
+              ? '<span class="badge bg-info text-white">ORACLE_HOME exists</span>'
+              : '<span class="badge bg-secondary text-white">Not installed</span>';
 
         document.getElementById('database-status').innerHTML = c.steps.step4_database
-            ? '<span class="badge badge-success">Running (' + c.running_instances.join(', ') + ')</span>'
-            : '<span class="badge badge-secondary">No database</span>';
+            ? '<span class="badge bg-success text-white">Running (' + c.running_instances.join(', ') + ')</span>'
+            : '<span class="badge bg-secondary text-white">No database</span>';
 
         if (c.oracle_home) document.getElementById('oracle-home').value = c.oracle_home;
         if (c.running_instances.length > 0) document.getElementById('db-name').value = c.running_instances[0];
@@ -594,10 +598,10 @@ async function runPrecheck() {
         const statusEl = document.getElementById('system-status');
         if (response.passed) {
             log('System precheck passed!', 'success');
-            statusEl.innerHTML = '<span class="badge badge-success">Ready</span>';
+            statusEl.innerHTML = '<span class="badge bg-success text-white">Ready</span>';
         } else {
             log('Precheck found issues:', 'error');
-            statusEl.innerHTML = '<span class="badge badge-warning">Issues Found</span>';
+            statusEl.innerHTML = '<span class="badge bg-warning text-dark">Issues Found</span>';
             if (response.issues) response.issues.forEach(i => log(`  - ${i}`, 'error'));
             if (response.output) document.getElementById('install-log').textContent = response.output;
         }
@@ -615,12 +619,12 @@ async function installSystem() {
     try {
         const response = await apiCall('/api/installation/system', 'POST');
         log(response.message || 'Started', 'success');
-        document.getElementById('system-status').innerHTML = '<span class="badge badge-info">Installing...</span>';
+        document.getElementById('system-status').innerHTML = '<span class="badge bg-info text-white">Installing...</span>';
         startLogPolling('system');
         await waitForCompletion('system', () => {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-cogs"></i> Install System';
-            document.getElementById('system-status').innerHTML = '<span class="badge badge-success">Installed</span>';
+            document.getElementById('system-status').innerHTML = '<span class="badge bg-success text-white">Installed</span>';
         });
     } catch (error) {
         log(`Failed: ${error.message}`, 'error');
@@ -642,12 +646,12 @@ async function installBinaries() {
     try {
         const response = await apiCall('/api/installation/binaries', 'POST', { oracle_home: oracleHome });
         log(response.message || 'Started', 'success');
-        document.getElementById('binaries-status').innerHTML = '<span class="badge badge-info">Installing...</span>';
+        document.getElementById('binaries-status').innerHTML = '<span class="badge bg-info text-white">Installing...</span>';
         startLogPolling('binaries');
         await waitForCompletion('binaries', () => {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-box"></i> Install Binaries';
-            document.getElementById('binaries-status').innerHTML = '<span class="badge badge-success">Installed</span>';
+            document.getElementById('binaries-status').innerHTML = '<span class="badge bg-success text-white">Installed</span>';
         });
     } catch (error) {
         log(`Failed: ${error.message}`, 'error');
@@ -669,12 +673,12 @@ async function createDatabase() {
     try {
         const response = await apiCall('/api/installation/database', 'POST', { db_name: dbName });
         log(response.message || 'Started', 'success');
-        document.getElementById('database-status').innerHTML = '<span class="badge badge-info">Creating...</span>';
+        document.getElementById('database-status').innerHTML = '<span class="badge bg-info text-white">Creating...</span>';
         startLogPolling('database');
         await waitForCompletion('database', () => {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-database"></i> Create Database';
-            document.getElementById('database-status').innerHTML = '<span class="badge badge-success">Running</span>';
+            document.getElementById('database-status').innerHTML = '<span class="badge bg-success text-white">Running</span>';
         });
     } catch (error) {
         log(`Failed: ${error.message}`, 'error');

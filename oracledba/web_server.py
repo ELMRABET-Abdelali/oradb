@@ -265,30 +265,29 @@ class SystemDetector:
             pass
 
         try:
-            # Processes & sessions
-            proc_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$process;")
-            for row in self._parse_sql_rows(proc_out):
-                try: metrics['processes']['count'] = int(row.get('CNT', 0))
-                except: pass
-
-            sess_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$session;")
-            for row in self._parse_sql_rows(sess_out):
-                try: metrics['sessions']['count'] = int(row.get('CNT', 0))
-                except: pass
-        except Exception:
-            pass
-
-        try:
-            # Datafiles & tempfiles
-            df_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$datafile;")
-            for row in self._parse_sql_rows(df_out):
-                try: metrics['datafiles'] = int(row.get('CNT', 0))
-                except: pass
-
-            tf_out = self._run_sql("SELECT COUNT(*) AS cnt FROM v$tempfile;")
-            for row in self._parse_sql_rows(tf_out):
-                try: metrics['tempfiles'] = int(row.get('CNT', 0))
-                except: pass
+            # Processes, sessions, datafiles, tempfiles — combined UNION ALL
+            # to guarantee 2+ columns so COLSEP '|' adds pipe separators.
+            # Single-column COUNT(*) queries produce no pipes → _parse_sql_rows finds nothing.
+            counts_out = self._run_sql(
+                "SELECT 'proc' AS metric, COUNT(*) AS cnt FROM v$process\n"
+                "UNION ALL SELECT 'sess', COUNT(*) FROM v$session\n"
+                "UNION ALL SELECT 'dfile', COUNT(*) FROM v$datafile\n"
+                "UNION ALL SELECT 'tfile', COUNT(*) FROM v$tempfile;"
+            )
+            for row in self._parse_sql_rows(counts_out):
+                try:
+                    v = int(row.get('CNT', 0))
+                    m = row.get('METRIC', '').strip().lower()
+                    if m == 'proc':
+                        metrics['processes']['count'] = v
+                    elif m == 'sess':
+                        metrics['sessions']['count'] = v
+                    elif m == 'dfile':
+                        metrics['datafiles'] = v
+                    elif m == 'tfile':
+                        metrics['tempfiles'] = v
+                except (ValueError, TypeError):
+                    pass
         except Exception:
             pass
 
@@ -1379,6 +1378,23 @@ exit;"""
             'output': output[:2000],
             'message': f'PDB {name} flashed back to {rp_name} and reopened'
         })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/databases/<name>/restore-point/<rp_name>', methods=['DELETE'])
+@login_required
+@admin_required
+def api_database_drop_restore_point(name, rp_name):
+    """API: Drop a restore point"""
+    import re as _re
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,29}$', name):
+        return jsonify({'success': False, 'error': 'Invalid PDB name'})
+    if not _re.match(r'^[A-Za-z][A-Za-z0-9_$#]{0,63}$', rp_name):
+        return jsonify({'success': False, 'error': 'Invalid restore point name'})
+    try:
+        result = run_sqlplus(f"DROP RESTORE POINT {rp_name.upper()};")
+        return jsonify({'success': True, 'message': f'Restore point {rp_name} dropped', 'output': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

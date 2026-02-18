@@ -463,7 +463,12 @@ async function loadRestorePoints() {
             + '<td style="font-size:.78rem;">' + (rp.time || '-') + '</td>'
             + '<td>' + (rp.scn || '-') + '</td>'
             + '<td>' + (rp.guaranteed === 'YES' ? '<span class="badge bg-success">YES</span>' : '<span class="badge bg-secondary">NO</span>') + '</td>'
-            + '<td><button class="btn btn-sm btn-outline-warning" onclick="flashbackTo(\'' + rp.name + '\')"><i class="fas fa-undo"></i> Flashback</button></td>'
+            + '<td>'  
+                + '<button class="btn btn-sm btn-outline-warning me-1" onclick="flashbackTo(\''+rp.name+'\')">' 
+                  + '<i class="fas fa-undo"></i> Flashback</button>'
+                + '<button class="btn btn-sm btn-outline-danger" onclick="deleteRestorePoint(\''+rp.name+'\')">' 
+                  + '<i class="fas fa-trash"></i> Drop</button>'
+              + '</td>'
             + '</tr>';
     }
     document.getElementById('rpBody').innerHTML = html;
@@ -475,6 +480,15 @@ async function createRestorePoint() {
     showDetailLog();
     appendDetailLog('Creating restore point ' + rpName + '...', 'step');
     const r = await apiCall('/api/databases/' + PDB + '/restore-point', 'POST', {name: rpName});
+    appendDetailLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
+    if (r.success) loadRestorePoints();
+}
+
+async function deleteRestorePoint(rpName) {
+    if (!confirm('Drop restore point ' + rpName + '? This cannot be undone.')) return;
+    showDetailLog();
+    appendDetailLog('Dropping restore point ' + rpName + '...', 'step');
+    const r = await apiCall('/api/databases/' + PDB + '/restore-point/' + encodeURIComponent(rpName), 'DELETE');
     appendDetailLog(r.success ? '\u2705 ' + r.message : '\u274c ' + r.error, r.success ? 'ok' : 'warn');
     if (r.success) loadRestorePoints();
 }
