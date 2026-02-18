@@ -10,6 +10,17 @@
     .val-changed { animation: valFlash .8s ease; }
     @keyframes valFlash { 0%{background:#fff3cd;} 100%{background:transparent;} }
     .status-badge, .card-body, .table td { transition: background .3s ease, color .3s ease; }
+    /* Compact background process pills */
+    .proc-pill { position:relative; display:inline-flex; align-items:center; font-size:1.4rem; cursor:default; }
+    .proc-badge { position:absolute; top:-5px; right:-8px; font-size:.65rem; min-width:1.2em; height:1.2em; display:flex; align-items:center; justify-content:center; border-radius:50%; padding:0 3px; }
+    /* SGA pool fill bars */
+    .sga-pool-bar { border-radius:4px; height:20px; background:#e9ecef; overflow:hidden; }
+    .sga-pool-fill { height:100%; border-radius:4px; transition:width .5s ease; background:linear-gradient(90deg,#28a745,#20c997); }
+    .sga-pool-fill.warning { background:linear-gradient(90deg,#ffc107,#fd7e14); }
+    .sga-pool-fill.danger { background:linear-gradient(90deg,#dc3545,#c82333); }
+    .sga-row { margin-bottom:.5rem; }
+    .sga-label { font-size:.8rem; font-weight:600; min-width:120px; display:inline-block; }
+    .sga-pct { font-size:.75rem; color:#6c757d; }
 </style>
 <div class="container-fluid">
     <div class="row mb-4">
@@ -112,57 +123,37 @@
                 <div class="card-header bg-primary text-white">
                     <i class="fas fa-cogs"></i> Background Processes (Elite Controller)
                 </div>
-                <div class="card-body">
-                    <div class="row text-center" id="processes-row">
-                        <div class="col-md-2">
-                            <div class="process-indicator">
-                                <i class="fas fa-memory text-danger" style="font-size: 2em;"></i>
-                                <h6>PMON</h6>
-                                <span class="badge bg-success text-white" id="pmon-count">{{ status.database.processes.pmon }}</span>
-                            </div>
+                <div class="card-body py-2">
+                    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-start" id="processes-row">
+                        <div class="proc-pill" title="Process Monitor">
+                            <i class="fas fa-memory text-danger"></i>
+                            <span class="proc-badge badge bg-success" id="pmon-count">{{ status.database.processes.pmon }}</span>
                         </div>
-                        <div class="col-md-2">
-                            <div class="process-indicator">
-                                <i class="fas fa-microchip text-warning" style="font-size: 2em;"></i>
-                                <h6>SMON</h6>
-                                <span class="badge bg-success text-white" id="smon-count">{{ status.database.processes.smon }}</span>
-                            </div>
+                        <div class="proc-pill" title="System Monitor">
+                            <i class="fas fa-microchip text-warning"></i>
+                            <span class="proc-badge badge bg-success" id="smon-count">{{ status.database.processes.smon }}</span>
                         </div>
-                        <div class="col-md-2">
-                            <div class="process-indicator">
-                                <i class="fas fa-save text-primary" style="font-size: 2em;"></i>
-                                <h6>DBWR</h6>
-                                <span class="badge bg-success text-white" id="dbwr-count">{{ status.database.processes.dbwr }}</span>
-                            </div>
+                        <div class="proc-pill" title="Database Writer">
+                            <i class="fas fa-save text-primary"></i>
+                            <span class="proc-badge badge bg-success" id="dbwr-count">{{ status.database.processes.dbwr }}</span>
                         </div>
-                        <div class="col-md-2">
-                            <div class="process-indicator">
-                                <i class="fas fa-file-alt text-info" style="font-size: 2em;"></i>
-                                <h6>LGWR</h6>
-                                <span class="badge bg-success text-white" id="lgwr-count">{{ status.database.processes.lgwr }}</span>
-                            </div>
+                        <div class="proc-pill" title="Log Writer">
+                            <i class="fas fa-file-alt text-info"></i>
+                            <span class="proc-badge badge bg-success" id="lgwr-count">{{ status.database.processes.lgwr }}</span>
                         </div>
-                        <div class="col-md-2">
-                            <div class="process-indicator">
-                                <i class="fas fa-check-circle text-success" style="font-size: 2em;"></i>
-                                <h6>CKPT</h6>
-                                <span class="badge bg-success text-white" id="ckpt-count">{{ status.database.processes.ckpt }}</span>
-                            </div>
+                        <div class="proc-pill" title="Checkpoint">
+                            <i class="fas fa-check-circle text-success"></i>
+                            <span class="proc-badge badge bg-success" id="ckpt-count">{{ status.database.processes.ckpt }}</span>
                         </div>
-                        <div class="col-md-1">
-                            <div class="process-indicator">
-                                <i class="fas fa-archive text-secondary" style="font-size: 2em;"></i>
-                                <h6>ARCH</h6>
-                                <span class="badge bg-success text-white" id="arch-count">{{ status.database.processes.arch }}</span>
-                            </div>
+                        <div class="proc-pill" title="Archiver">
+                            <i class="fas fa-archive text-secondary"></i>
+                            <span class="proc-badge badge bg-success" id="arch-count">{{ status.database.processes.arch }}</span>
                         </div>
-                        <div class="col-md-1">
-                            <div class="process-indicator">
-                                <i class="fas fa-medkit text-danger" style="font-size: 2em;"></i>
-                                <h6>RECO</h6>
-                                <span class="badge bg-success text-white" id="reco-count">{{ status.database.processes.reco }}</span>
-                            </div>
+                        <div class="proc-pill" title="Distributed Recovery">
+                            <i class="fas fa-medkit text-danger"></i>
+                            <span class="proc-badge badge bg-success" id="reco-count">{{ status.database.processes.reco }}</span>
                         </div>
+                        <small class="text-muted ms-2 fst-italic">Hover for process name</small>
                     </div>
                 </div>
             </div>
