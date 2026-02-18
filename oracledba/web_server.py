@@ -268,6 +268,8 @@ class SystemDetector:
             # Processes, sessions, datafiles, tempfiles — combined UNION ALL
             # to guarantee 2+ columns so COLSEP '|' adds pipe separators.
             # Single-column COUNT(*) queries produce no pipes → _parse_sql_rows finds nothing.
+            # Note: sqlplus truncates column alias to data width, so 'METRIC' becomes 'METRI'
+            # for 4-char values like 'proc'. Use startswith match or direct value inspection.
             counts_out = self._run_sql(
                 "SELECT 'proc' AS metric, COUNT(*) AS cnt FROM v$process\n"
                 "UNION ALL SELECT 'sess', COUNT(*) FROM v$session\n"
@@ -277,7 +279,8 @@ class SystemDetector:
             for row in self._parse_sql_rows(counts_out):
                 try:
                     v = int(row.get('CNT', 0))
-                    m = row.get('METRIC', '').strip().lower()
+                    # Header alias may be truncated (METRIC→METRI). Try both.
+                    m = (row.get('METRIC') or row.get('METRI') or '').strip().lower()
                     if m == 'proc':
                         metrics['processes']['count'] = v
                     elif m == 'sess':
